@@ -1,0 +1,38 @@
+{
+  "name": "lagwar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "LAG WAR — browser FPS where the host cranks artificial lag from 0 to 10 seconds. Babylon.js + Colyseus, no login, party codes.",
+  "scripts": {
+    "dev:server": "tsx watch src/server/index.ts",
+    "dev:client": "vite",
+    "dev": "concurrently -k -n server,client -c green,cyan \"npm:dev:server\" \"npm:dev:client\"",
+    "build:client": "vite build",
+    "start": "tsx src/server/index.ts",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke-e2e.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^7",
+    "@babylonjs/loaders": "^7",
+    "@colyseus/core": "^0.16",
+    "@colyseus/schema": "^3",
+    "@colyseus/ws-transport": "^0.16",
+    "colyseus": "^0.16",
+    "colyseus.js": "^0.16",
+    "express": "^4"
+  },
+  "devDependencies": {
+    "@colyseus/testing": "^0.16",
+    "@types/express": "^4",
+    "@types/node": "^22",
+    "concurrently": "^9",
+    "puppeteer-core": "^23",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vite": "^5",
+    "vitest": "^2"
+  }
+}

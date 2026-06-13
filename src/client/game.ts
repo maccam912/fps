@@ -573,6 +573,7 @@ export class Game {
   private update(dt: number): void {
     const state = this.net.room?.state;
     if (!state) return;
+    const roundEnded = state.roundPhase === "ended";
     const k = 1 - Math.exp(-SMOOTH * dt);
 
     for (const [id, v] of this.players) {
@@ -619,7 +620,7 @@ export class Game {
       this.hud.setWeapon(ms.weapon, ms.ammo, ms.reloading);
       this.setViewmodel(ms.weapon);
       this.hud.setPing(this.net.rtt, state.forcedLagMs);
-      this.hud.setDead(!ms.alive);
+      this.hud.setDead(!ms.alive && !roundEnded);
       if (!ms.alive && this.wasAlive) document.exitPointerLock?.();
       if (ms.alive && !this.wasAlive) this.audio.play("respawn", 0.5);
       this.wasAlive = ms.alive;
@@ -670,10 +671,10 @@ export class Game {
       this.net.sessionId,
       state.code,
     );
-    const roundEnded = state.roundPhase === "ended";
     this.hud.setRound(state.roundTimeLeftMs, state.roundNumber, roundEnded, this.isHost(), state.winnerName);
     if (roundEnded && this.lastRoundPhase !== "ended") {
       this.firing = false;
+      this.hud.setHostPanelVisible(false);
       document.exitPointerLock?.();
       const result = state.winnerName === "TIE" ? "ROUND ENDS IN A TIE" : `${state.winnerName} WINS THE ROUND`;
       this.hud.banner(result, 3500);
@@ -681,6 +682,7 @@ export class Game {
     }
     if (!roundEnded && this.lastRoundPhase === "ended") {
       this.hud.setScoreboardVisible(false);
+      this.hud.setPausedHint(document.pointerLockElement !== this.canvas);
       this.hud.banner(`ROUND ${state.roundNumber}`, 1800);
     }
     this.lastWinner = state.winnerName;

@@ -149,7 +149,10 @@ export class Hud {
     el("round-result-title").textContent = ended
       ? winnerName === "TIE" ? "TIE GAME" : winnerName ? `${winnerName} WINS` : "ROUND OVER"
       : "";
-    if (ended) this.setScoreboardVisible(true);
+    if (ended) {
+      this.setScoreboardVisible(true);
+      this.setPausedHint(false);
+    }
   }
 
   renderScoreboard(rows: ScoreRow[], myId: string, code: string): void {

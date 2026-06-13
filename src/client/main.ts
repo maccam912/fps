@@ -6,6 +6,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 
 const nameInput = $<HTMLInputElement>("name-input");
 const codeInput = $<HTMLInputElement>("code-input");
+const durationInput = $<HTMLInputElement>("round-duration");
 const errBox = $("lobby-error");
 
 const ADJ = ["Laggy", "Rubber", "Packet", "Jitter", "Buffer", "Choppy", "Dialup", "Pingy"];
@@ -22,7 +23,7 @@ nameInput.value = localStorage.getItem("lagwar-name") ?? randomName();
 const urlCode = new URLSearchParams(location.search).get("code");
 if (urlCode) codeInput.value = urlCode.toUpperCase();
 
-async function join(code: string): Promise<void> {
+async function join(code: string, roundDurationMinutes?: number): Promise<void> {
   const name = nameInput.value.trim() || randomName();
   localStorage.setItem("lagwar-name", name);
   errBox.classList.add("hidden");
@@ -37,7 +38,7 @@ async function join(code: string): Promise<void> {
       onWeaponFx: (m) => game.onWeaponFx(m),
       onPickup: (m) => game.onPickup(m),
       onHitConfirm: () => game.onHitConfirm(),
-    });
+    }, roundDurationMinutes);
 
     // Exposed for the headless smoke test.
     (window as any).__lagwar = { net, game };
@@ -55,7 +56,10 @@ async function join(code: string): Promise<void> {
   }
 }
 
-$("create-btn").addEventListener("click", () => join(codeInput.value.trim() || randomCode()));
+$("create-btn").addEventListener("click", () => {
+  const minutes = Math.max(1, Math.min(60, Number(durationInput.value) || 5));
+  join(codeInput.value.trim() || randomCode(), minutes);
+});
 $("join-btn").addEventListener("click", () => {
   const code = codeInput.value.trim();
   if (!code) {

@@ -70,6 +70,7 @@ export class Game {
   private shake = 0;
   private wasAlive = true;
   private lastWinner = "";
+  private lastRoundPhase = "playing";
   private lastFootstep = 0;
   private flareTex: Texture | null = null;
 
@@ -88,6 +89,7 @@ export class Game {
     this.bindInput();
     this.hud.show();
     this.hud.onSetLag = (ms) => this.net.setLag(ms);
+    this.hud.onStartRound = () => this.net.startRound();
     this.audio.playMusic("music-game.ogg", 0.16);
     this.audio.play("join", 0.7);
 
@@ -488,7 +490,9 @@ export class Game {
     });
     window.addEventListener("keyup", (e) => {
       this.keys.delete(e.code);
-      if (e.code === "Tab") this.hud.setScoreboardVisible(false);
+      if (e.code === "Tab" && this.net.room.state.roundPhase !== "ended") {
+        this.hud.setScoreboardVisible(false);
+      }
     });
   }
 
@@ -506,7 +510,7 @@ export class Game {
       yaw: this.yaw,
       pitch: this.pitch,
       jump: this.latched.jump || this.keys.has("Space"),
-      fire: this.firing,
+      fire: this.firing && this.net.room.state.roundPhase === "playing",
       reload: this.latched.reload,
     };
     this.latched = { jump: false, reload: false };
@@ -666,11 +670,21 @@ export class Game {
       this.net.sessionId,
       state.code,
     );
-    if (state.winnerName && state.winnerName !== this.lastWinner) {
-      this.hud.banner(`🏆 ${state.winnerName} WINS THE ROUND`, 5500);
+    const roundEnded = state.roundPhase === "ended";
+    this.hud.setRound(state.roundTimeLeftMs, state.roundNumber, roundEnded, this.isHost(), state.winnerName);
+    if (roundEnded && this.lastRoundPhase !== "ended") {
+      this.firing = false;
+      document.exitPointerLock?.();
+      const result = state.winnerName === "TIE" ? "ROUND ENDS IN A TIE" : `${state.winnerName} WINS THE ROUND`;
+      this.hud.banner(result, 3500);
       this.audio.play("win", 0.9);
     }
+    if (!roundEnded && this.lastRoundPhase === "ended") {
+      this.hud.setScoreboardVisible(false);
+      this.hud.banner(`ROUND ${state.roundNumber}`, 1800);
+    }
     this.lastWinner = state.winnerName;
+    this.lastRoundPhase = state.roundPhase;
   }
 
   private myState(): PlayerState | undefined {

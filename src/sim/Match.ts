@@ -2,7 +2,8 @@
 // deployables, damage, and forced lag all advance only through tick().
 
 import {
-  PLAYER, MG, CHAIN_RADIUS, KILL_TARGET, ROUND_RESET_MS, MAX_FORCED_LAG_MS,
+  PLAYER, MG, CHAIN_RADIUS, DEFAULT_ROUND_DURATION_MS, MAX_FORCED_LAG_MS,
+  MIN_ROUND_DURATION_MS, MAX_ROUND_DURATION_MS,
   PICKUP_ACTIVE_COUNT, PICKUP_RADIUS, PICKUP_RESPAWN_MS,
 } from "@shared/constants";
 import { PICKUP_POINTS, SPAWN_POINTS } from "@shared/map";
@@ -89,7 +90,8 @@ export type SimEvent =
   | { type: "hit"; shooterId: string; victimId: string; damage: number }
   | { type: "spawn"; id: string }
   | { type: "win"; id: string }
-  | { type: "roundReset" };
+  | { type: "roundEnd"; winnerId: string }
+  | { type: "roundStart"; roundNumber: number };
 
 export class Match {
   timeMs = 0;
@@ -98,15 +100,20 @@ export class Match {
   pickups = new Map<string, SimPickup>();
   entities = new Map<string, SimEntity>();
   winnerId = "";
-  private roundResetAt = 0;
+  roundPhase: "playing" | "ended" = "playing";
+  roundDurationMs: number;
+  roundEndsAt: number;
+  roundNumber = 1;
   private events: SimEvent[] = [];
   private boxes: Box[] = worldBoxes();
   private rng: () => number;
   private nextId = 1;
   private pickupRespawns = new Map<number, number>();
 
-  constructor(seed = 1234) {
+  constructor(seed = 1234, roundDurationMs = DEFAULT_ROUND_DURATION_MS) {
     this.rng = mulberry32(seed);
+    this.roundDurationMs = clampRoundDuration(roundDurationMs);
+    this.roundEndsAt = this.roundDurationMs;
     this.fillPickupPads();
   }
 
@@ -140,6 +147,7 @@ export class Match {
   }
 
   enqueueInput(id: string, input: PlayerInput): void {
+    if (this.roundPhase !== "playing") return;
     const p = this.players.get(id);
     if (!p) return;
     const applyAt = this.timeMs + this.forcedLagMs;
@@ -156,6 +164,7 @@ export class Match {
 
   tick(dtMs: number): void {
     this.timeMs += dtMs;
+    if (this.roundPhase === "ended") return;
     const dt = dtMs / 1000;
     for (const p of this.players.values()) {
       this.applyDueInputs(p);
@@ -164,6 +173,29 @@ export class Match {
     this.stepPickups();
     this.stepEntities(dt);
     this.stepRound();
+  }
+
+  get roundTimeLeftMs(): number {
+    return this.roundPhase === "playing" ? Math.max(0, this.roundEndsAt - this.timeMs) : 0;
+  }
+
+  startRound(): void {
+    this.roundNumber++;
+    this.roundPhase = "playing";
+    this.roundEndsAt = this.timeMs + this.roundDurationMs;
+    this.winnerId = "";
+    this.entities.clear();
+    this.fillPickupPads();
+    for (const p of this.players.values()) {
+      p.kills = 0;
+      p.deaths = 0;
+      p.queue = [];
+      p.cur = { ...IDLE_INPUT, yaw: p.yaw };
+      p.triggerPressed = false;
+      this.equip(p, "mg");
+      this.respawn(p);
+    }
+    this.events.push({ type: "roundStart", roundNumber: this.roundNumber });
   }
 
   private applyDueInputs(p: SimPlayer): void {
@@ -705,7 +737,7 @@ export class Match {
   }
 
   private damage(victim: SimPlayer, amount: number, attackerId: string, cause: KillCause): void {
-    if (!victim.alive || this.winnerId) return;
+    if (!victim.alive || this.roundPhase !== "playing") return;
     victim.hp -= amount;
     if (attackerId !== victim.id) {
       this.events.push({ type: "hit", shooterId: attackerId, victimId: victim.id, damage: amount });
@@ -719,11 +751,6 @@ export class Match {
     const killer = this.players.get(attackerId);
     if (killer && attackerId !== victim.id) {
       killer.kills++;
-      if (killer.kills >= KILL_TARGET && !this.winnerId) {
-        this.winnerId = killer.id;
-        this.roundResetAt = this.timeMs + ROUND_RESET_MS;
-        this.events.push({ type: "win", id: killer.id });
-      }
     }
   }
 
@@ -743,17 +770,29 @@ export class Match {
   }
 
   private stepRound(): void {
-    if (!this.winnerId || this.timeMs < this.roundResetAt) return;
-    this.winnerId = "";
-    this.entities.clear();
-    this.fillPickupPads();
+    if (this.timeMs < this.roundEndsAt) return;
+    this.roundPhase = "ended";
+    this.winnerId = this.findWinnerId();
     for (const p of this.players.values()) {
-      p.kills = 0;
-      p.deaths = 0;
-      this.equip(p, "mg");
-      this.respawn(p);
+      p.cur = { ...IDLE_INPUT, yaw: p.yaw };
+      p.queue = [];
+      p.moving = false;
+      p.triggerPressed = false;
     }
-    this.events.push({ type: "roundReset" });
+    this.events.push({ type: "roundEnd", winnerId: this.winnerId });
+  }
+
+  private findWinnerId(): string {
+    const ranked = [...this.players.values()].sort(
+      (a, b) => b.kills - a.kills || a.deaths - b.deaths || a.name.localeCompare(b.name),
+    );
+    if (ranked.length === 0) return "";
+    if (
+      ranked.length > 1 &&
+      ranked[0].kills === ranked[1].kills &&
+      ranked[0].deaths === ranked[1].deaths
+    ) return "";
+    return ranked[0].id;
   }
 
   private pickSpawn() {
@@ -789,4 +828,9 @@ function shuffle<T>(items: T[], rng: () => number): void {
     const j = Math.floor(rng() * (i + 1));
     [items[i], items[j]] = [items[j], items[i]];
   }
+}
+
+function clampRoundDuration(ms: number): number {
+  const value = Number.isFinite(ms) ? Math.round(ms) : DEFAULT_ROUND_DURATION_MS;
+  return Math.max(MIN_ROUND_DURATION_MS, Math.min(MAX_ROUND_DURATION_MS, value));
 }

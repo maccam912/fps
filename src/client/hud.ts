@@ -32,6 +32,7 @@ function el<T extends HTMLElement = HTMLElement>(id: string): T {
 
 export class Hud {
   onSetLag: ((ms: number) => void) | null = null;
+  onStartRound: (() => void) | null = null;
   private lastHp = 100;
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -50,6 +51,7 @@ export class Hud {
     document.querySelectorAll<HTMLButtonElement>(".hp-presets button").forEach((b) => {
       b.addEventListener("click", () => apply(Number(b.dataset.lag)));
     });
+    el<HTMLButtonElement>("next-round-btn").addEventListener("click", () => this.onStartRound?.());
   }
 
   show(): void {
@@ -131,6 +133,23 @@ export class Hud {
 
   setScoreboardVisible(visible: boolean): void {
     el("scoreboard").classList.toggle("hidden", !visible);
+  }
+
+  setRound(timeLeftMs: number, roundNumber: number, ended: boolean, isHost: boolean, winnerName: string): void {
+    const seconds = Math.max(0, Math.ceil(timeLeftMs / 1000));
+    el("round-label").textContent = `ROUND ${roundNumber}`;
+    el("round-time").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    el("round-clock").classList.toggle("ended", ended);
+
+    el("round-results").classList.toggle("hidden", !ended);
+    el("sb-heading").textContent = ended ? `ROUND ${roundNumber} RESULTS` : "SCOREBOARD";
+    el("sb-hint").classList.toggle("hidden", ended);
+    el("next-round-btn").classList.toggle("hidden", !ended || !isHost);
+    el("next-round-wait").classList.toggle("hidden", !ended || isHost);
+    el("round-result-title").textContent = ended
+      ? winnerName === "TIE" ? "TIE GAME" : winnerName ? `${winnerName} WINS` : "ROUND OVER"
+      : "";
+    if (ended) this.setScoreboardVisible(true);
   }
 
   renderScoreboard(rows: ScoreRow[], myId: string, code: string): void {

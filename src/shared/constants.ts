@@ -34,8 +34,9 @@ export const PICKUP_RADIUS = 1.1;
 // Explosions sympathetically detonate other explosives within this range.
 export const CHAIN_RADIUS = 3.0;
 
-export const KILL_TARGET = 15; // first to N kills wins the round
-export const ROUND_RESET_MS = 6000; // victory banner time before scores reset
+export const DEFAULT_ROUND_DURATION_MS = 5 * 60_000;
+export const MIN_ROUND_DURATION_MS = 60_000;
+export const MAX_ROUND_DURATION_MS = 60 * 60_000;
 
 export const SKIN_COUNT = 8; // character-a .. character-h
 

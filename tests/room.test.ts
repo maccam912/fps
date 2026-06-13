@@ -91,6 +91,29 @@ describe("FpsRoom", () => {
     await host.leave();
   });
 
+  it("uses the host's custom duration and only the host can start the next round", async () => {
+    const host = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "TIME", name: "Host", roundDurationMinutes: 2,
+    });
+    const peer = await server.sdk.joinOrCreate(ROOM_NAME, { code: "TIME", name: "Peer" });
+    const room = server.getRoomById(host.roomId) as any;
+    await until(() => host.state.roundDurationMs === 120_000);
+
+    room.match.roundEndsAt = room.match.timeMs + 1;
+    await until(() => host.state.roundPhase === "ended");
+
+    await sendAndProcess(room, peer, MSG.startRound, {});
+    await new Promise((r) => setTimeout(r, 100));
+    expect(host.state.roundPhase).toBe("ended");
+
+    await sendAndProcess(room, host, MSG.startRound, {});
+    await until(() => host.state.roundPhase === "playing" && host.state.roundNumber === 2);
+    expect(host.state.players.get(host.sessionId)?.kills).toBe(0);
+
+    await peer.leave();
+    await host.leave();
+  });
+
   it("ping is answered instantly and rtt lands on the scoreboard", async () => {
     const c = await server.sdk.joinOrCreate(ROOM_NAME, { code: "PING", name: "P" });
     const room = server.getRoomById(c.roomId);

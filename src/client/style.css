@@ -148,6 +148,17 @@ html, body {
 #lag-banner .lag-label { font-size: 11px; letter-spacing: 2px; color: var(--accent2); }
 #lag-value { font-size: 24px; font-weight: 900; color: #fff; }
 
+#round-clock {
+  position: absolute; top: 18px; left: 18px;
+  display: flex; flex-direction: column;
+  background: rgba(10, 16, 24, .82); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 13px; min-width: 92px;
+}
+#round-label { color: #7d98a6; font-size: 9px; letter-spacing: 2px; }
+#round-time { color: #fff; font-size: 24px; font-weight: 900; line-height: 1.1; }
+#round-clock.ended { border-color: var(--accent2); }
+#round-clock.ended #round-time { color: var(--accent2); }
+
 #killfeed {
   position: absolute; top: 16px; right: 18px;
   display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
@@ -215,12 +226,22 @@ html, body {
   border-radius: 12px; padding: 20px 26px;
 }
 .sb-title { font-size: 15px; letter-spacing: 3px; color: var(--accent); margin-bottom: 12px; }
-.sb-title span { float: right; color: #fff; }
+#sb-code { float: right; color: #fff; }
 #scoreboard table { width: 100%; border-collapse: collapse; font-size: 15px; }
 #scoreboard th { font-size: 10px; letter-spacing: 2px; color: #6e8694; text-align: left; padding: 4px 10px; }
 #scoreboard td { padding: 6px 10px; border-top: 1px solid rgba(255,255,255,.06); }
 #scoreboard tr.me td { color: var(--accent); font-weight: 700; }
 .sb-hint { margin-top: 12px; font-size: 11px; color: #51606b; }
+#round-results {
+  margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.1);
+  text-align: center; pointer-events: auto;
+}
+#round-result-title {
+  margin-bottom: 12px; color: #fff; font-size: 24px; font-weight: 900;
+  letter-spacing: 2px; text-shadow: 0 0 14px rgba(108,243,255,.45);
+}
+#next-round-btn { width: 100%; }
+#next-round-wait { color: #8da4b0; font-size: 12px; letter-spacing: 1px; }
 
 #host-panel {
   position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);

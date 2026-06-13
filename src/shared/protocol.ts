@@ -47,6 +47,7 @@ export const MSG = {
   ping: "ping", // { t: clientTimeMs }
   rtt: "rtt", // { ms } measured round trip, stored for the scoreboard
   setLag: "setLag", // host only: { ms: 0..10000 }
+  startRound: "startRound", // host only, resets scores and starts the configured timer
 
   // server -> client
   pong: "pong", // { t } echoed

@@ -20,6 +20,11 @@
         <input id="name-input" maxlength="16" placeholder="Trigger McDelay" autocomplete="off" />
       </label>
 
+      <label class="field">
+        <span>ROUND LENGTH (NEW PARTY ONLY)</span>
+        <input id="round-duration" type="number" min="1" max="60" step="1" value="5" />
+      </label>
+
       <div class="lobby-actions">
         <button id="create-btn" class="btn primary">CREATE PARTY</button>
         <div class="join-row">
@@ -50,6 +55,11 @@
       <span id="lag-value">0.0s</span>
     </div>
 
+    <div id="round-clock">
+      <span id="round-label">ROUND 1</span>
+      <span id="round-time">5:00</span>
+    </div>
+
     <div id="killfeed"></div>
 
     <div id="hud-bottom">
@@ -76,12 +86,17 @@
     </div>
 
     <div id="scoreboard" class="hidden">
-      <div class="sb-title">SCOREBOARD <span id="sb-code"></span></div>
+      <div class="sb-title"><span id="sb-heading">SCOREBOARD</span> <span id="sb-code"></span></div>
       <table>
         <thead><tr><th></th><th>player</th><th>kills</th><th>deaths</th><th>ping</th></tr></thead>
         <tbody id="sb-body"></tbody>
       </table>
-      <div class="sb-hint">share the party link to invite players</div>
+      <div id="round-results" class="hidden">
+        <div id="round-result-title"></div>
+        <button id="next-round-btn" class="btn primary hidden">START NEXT ROUND</button>
+        <div id="next-round-wait" class="hidden">waiting for the host to start another round</div>
+      </div>
+      <div id="sb-hint" class="sb-hint">share the party link to invite players</div>
     </div>
 
     <!-- host lag console -->

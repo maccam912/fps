@@ -1,19 +1,26 @@
 import { Room, Client } from "@colyseus/core";
 import { EntityState, GameState, PickupState, PlayerState } from "@shared/schema";
 import { MSG, PlayerInput, KillMsg } from "@shared/protocol";
-import { TICK_MS, PATCH_MS, MAX_FORCED_LAG_MS, SKIN_COUNT } from "@shared/constants";
+import {
+  TICK_MS, PATCH_MS, MAX_FORCED_LAG_MS, SKIN_COUNT,
+  DEFAULT_ROUND_DURATION_MS, MIN_ROUND_DURATION_MS, MAX_ROUND_DURATION_MS,
+} from "@shared/constants";
 import { Match } from "../sim/Match";
 
-interface JoinOptions { code?: string; name?: string }
+interface JoinOptions { code?: string; name?: string; roundDurationMinutes?: number }
 
 export class FpsRoom extends Room<GameState> {
   maxClients = 16;
-  private match = new Match(Date.now() & 0xffffffff);
+  private match!: Match;
   private skinCounter = 0;
 
   onCreate(options: JoinOptions) {
+    const roundDurationMs = sanitizeRoundDuration(options.roundDurationMinutes);
+    this.match = new Match(Date.now() & 0xffffffff, roundDurationMs);
     this.setState(new GameState());
     this.state.code = String(options.code ?? "").toUpperCase().slice(0, 8);
+    this.state.roundDurationMs = roundDurationMs;
+    this.state.roundTimeLeftMs = roundDurationMs;
     this.setPatchRate(PATCH_MS);
 
     this.onMessage(MSG.input, (client, input: PlayerInput) => {
@@ -36,6 +43,12 @@ export class FpsRoom extends Room<GameState> {
       const ms = Math.max(0, Math.min(MAX_FORCED_LAG_MS, Math.round(msg?.ms ?? 0)));
       this.match.setForcedLag(ms);
       this.state.forcedLagMs = ms;
+    });
+
+    this.onMessage(MSG.startRound, (client) => {
+      if (client.sessionId !== this.state.hostId || this.match.roundPhase !== "ended") return;
+      this.match.startRound();
+      this.syncToState();
     });
 
     this.setSimulationInterval((dt) => this.update(dt), TICK_MS);
@@ -165,7 +178,11 @@ export class FpsRoom extends Room<GameState> {
     s.winnerId = this.match.winnerId;
     s.winnerName = this.match.winnerId
       ? this.match.players.get(this.match.winnerId)?.name ?? ""
-      : "";
+      : this.match.roundPhase === "ended" && this.match.players.size > 0 ? "TIE" : "";
+    s.roundPhase = this.match.roundPhase;
+    s.roundDurationMs = this.match.roundDurationMs;
+    s.roundTimeLeftMs = Math.round(this.match.roundTimeLeftMs);
+    s.roundNumber = this.match.roundNumber;
   }
 }
 
@@ -208,6 +225,13 @@ function sanitizeInput(i: PlayerInput): PlayerInput {
 function sanitizeName(name: unknown): string {
   const s = String(name ?? "").trim().slice(0, 16);
   return s || `Player${Math.floor(Math.random() * 900 + 100)}`;
+}
+
+function sanitizeRoundDuration(minutes: unknown): number {
+  const value = Number(minutes);
+  if (!Number.isFinite(value)) return DEFAULT_ROUND_DURATION_MS;
+  const ms = Math.round(value * 60_000);
+  return Math.max(MIN_ROUND_DURATION_MS, Math.min(MAX_ROUND_DURATION_MS, ms));
 }
 
 function clamp(v: number, lo: number, hi: number) {

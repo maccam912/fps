@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Match, type SimPlayer } from "../src/sim/Match";
 import {
-  KILL_TARGET, MG, PICKUP_ACTIVE_COUNT, PICKUP_RESPAWN_MS,
-  PLAYER, ROUND_RESET_MS, TICK_MS,
+  MG, MIN_ROUND_DURATION_MS, PICKUP_ACTIVE_COUNT, PICKUP_RESPAWN_MS,
+  PLAYER, TICK_MS,
 } from "@shared/constants";
 import { PICKUP_WEAPONS, WEAPONS, type PlayerInput, type WeaponKind } from "@shared/protocol";
 
@@ -192,22 +192,46 @@ describe("weapon behavior", () => {
 });
 
 describe("rounds", () => {
-  it("declares a winner and resets players, entities, and pickups", () => {
-    const m = new Match(20);
+  it("ends on the timer, preserves scores, and waits for a new round", () => {
+    const m = new Match(20, MIN_ROUND_DURATION_MS);
     const a = m.addPlayer("a", "A", 0);
     const b = m.addPlayer("b", "B", 1);
-    a.kills = KILL_TARGET - 1;
-    place(a, 0, -20);
-    place(b, 0, -15);
-    equip(a, "mg");
-    m.enqueueInput("a", input({ fire: true, yaw: yawToward(a, b) }));
-    run(m, 4000);
+    a.kills = 4;
+    a.deaths = 2;
+    b.kills = 3;
+    b.deaths = 1;
+
+    run(m, MIN_ROUND_DURATION_MS + 100);
+    expect(m.roundPhase).toBe("ended");
     expect(m.winnerId).toBe("a");
-    run(m, ROUND_RESET_MS + 100);
+    expect(a.kills).toBe(4);
+    expect(a.deaths).toBe(2);
+    expect(m.roundTimeLeftMs).toBe(0);
+
+    run(m, 5000);
+    expect(m.roundPhase).toBe("ended");
+    expect(a.kills).toBe(4);
+
+    m.startRound();
+    expect(m.roundPhase).toBe("playing");
     expect(m.winnerId).toBe("");
     expect(a.weapon).toBe("mg");
     expect(a.kills).toBe(0);
+    expect(a.deaths).toBe(0);
     expect(m.pickups.size).toBe(PICKUP_ACTIVE_COUNT);
     expect(m.entities.size).toBe(0);
+    expect(m.roundNumber).toBe(2);
+    expect(m.roundTimeLeftMs).toBe(MIN_ROUND_DURATION_MS);
+  });
+
+  it("reports a tie when kills and deaths are equal", () => {
+    const m = new Match(21, MIN_ROUND_DURATION_MS);
+    const a = m.addPlayer("a", "A", 0);
+    const b = m.addPlayer("b", "B", 1);
+    a.kills = b.kills = 2;
+    a.deaths = b.deaths = 3;
+    run(m, MIN_ROUND_DURATION_MS + 100);
+    expect(m.roundPhase).toBe("ended");
+    expect(m.winnerId).toBe("");
   });
 });

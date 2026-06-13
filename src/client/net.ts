@@ -32,11 +32,12 @@ export class Net {
     return this.room.sessionId;
   }
 
-  async connect(code: string, name: string, events: NetEvents): Promise<void> {
+  async connect(code: string, name: string, events: NetEvents, roundDurationMinutes?: number): Promise<void> {
     const client = new Client(endpoint());
     this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {
       code: code.toUpperCase(), // filterBy matches raw strings — normalize here
       name,
+      roundDurationMinutes,
     });
     this.$ = getStateCallbacks(this.room);
 
@@ -63,6 +64,10 @@ export class Net {
 
   setLag(ms: number): void {
     this.room.send(MSG.setLag, { ms });
+  }
+
+  startRound(): void {
+    this.room.send(MSG.startRound);
   }
 
   dispose(): void {

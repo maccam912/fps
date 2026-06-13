@@ -54,6 +54,10 @@ export class GameState extends Schema {
   @type("uint16") forcedLagMs = 0;
   @type("string") code = "";
 
+  @type("string") roundPhase = "playing";
+  @type("number") roundDurationMs = 0;
+  @type("number") roundTimeLeftMs = 0;
+  @type("uint16") roundNumber = 1;
   @type("string") winnerId = "";
   @type("string") winnerName = "";
 }

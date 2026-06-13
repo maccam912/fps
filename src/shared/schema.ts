@@ -24,7 +24,8 @@ export class PlayerState extends Schema {
   @type("boolean") reloading = false;
 
   @type("uint16") ping = 0; // natural RTT in ms, self-reported by the client
-  @type("number") forcedLagMs = 0;
+  @type("number") forcedLagMs = 0; // target one-way input latency
+  @type("number") artificialLagMs = 0; // server delay after subtracting half RTT
 }
 
 export class PickupState extends Schema {

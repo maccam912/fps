@@ -52,6 +52,7 @@ export interface SimPlayer {
   triggerPressed: boolean;
   cur: PlayerInput;
   queue: QueuedInput[];
+  naturalRttMs: number;
 }
 
 export interface SimPickup {
@@ -136,6 +137,7 @@ export class Match {
       lastFireAt: -1e9, triggerPressed: false,
       cur: { ...IDLE_INPUT, yaw: spawn.yaw },
       queue: [],
+      naturalRttMs: 0,
     };
     this.players.set(id, p);
     return p;
@@ -167,11 +169,23 @@ export class Match {
     return this.lagCapMs > 0 ? Math.min(lag, this.lagCapMs) : lag;
   }
 
+  setPlayerRtt(id: string, rttMs: number): void {
+    const p = this.players.get(id);
+    if (!p) return;
+    p.naturalRttMs = sanitizeNonNegativeMs(rttMs);
+  }
+
+  getPlayerArtificialLagMs(id: string): number {
+    const targetLagMs = this.getPlayerLagMs(id);
+    const naturalOneWayMs = (this.players.get(id)?.naturalRttMs ?? 0) / 2;
+    return Math.max(0, Math.round(targetLagMs - naturalOneWayMs));
+  }
+
   enqueueInput(id: string, input: PlayerInput): void {
     if (this.roundPhase !== "playing") return;
     const p = this.players.get(id);
     if (!p) return;
-    const applyAt = this.timeMs + this.getPlayerLagMs(id);
+    const applyAt = this.timeMs + this.getPlayerArtificialLagMs(id);
     let i = p.queue.length;
     while (i > 0 && p.queue[i - 1].applyAt > applyAt) i--;
     p.queue.splice(i, 0, { applyAt, input });

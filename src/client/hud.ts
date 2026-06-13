@@ -24,6 +24,7 @@ export interface ScoreRow {
   deaths: number;
   ping: number;
   forcedLagMs: number;
+  artificialLagMs: number;
   host: boolean;
 }
 
@@ -85,24 +86,24 @@ export class Hud {
     el("ammo-label").textContent = weapon === "mg" ? "AMMO" : "CHARGES";
   }
 
-  setPing(naturalMs: number, forcedMs: number, lagMode: string): void {
+  setPing(naturalMs: number, targetMs: number, artificialMs: number, lagMode: string): void {
     el("ping-natural").textContent = `ping ${Math.round(naturalMs)}ms`;
     const f = el("ping-forced");
-    f.classList.toggle("hidden", forcedMs === 0);
-    f.textContent = `+lag ${(forcedMs / 1000).toFixed(1)}s`;
+    f.classList.toggle("hidden", targetMs === 0);
+    f.textContent = `target ${Math.round(targetMs)}ms (+${Math.round(artificialMs)}ms)`;
 
     const banner = el("lag-banner");
-    banner.classList.toggle("hidden", forcedMs === 0);
+    banner.classList.toggle("hidden", targetMs === 0);
     el("lag-label").textContent = lagMode === "kills" ? "KILL LAG" : "FORCED LAG";
-    el("lag-value").textContent = `${(forcedMs / 1000).toFixed(1)}s`;
+    el("lag-value").textContent = `${(targetMs / 1000).toFixed(1)}s`;
 
     if (lagMode !== "host") return;
 
     // Reflect server state after clamping.
     const slider = el<HTMLInputElement>("lag-slider");
     if (document.activeElement !== slider && document.activeElement?.id !== "lag-number") {
-      slider.value = String(forcedMs);
-      el<HTMLInputElement>("lag-number").value = String(forcedMs);
+      slider.value = String(targetMs);
+      el<HTMLInputElement>("lag-number").value = String(targetMs);
     }
   }
 
@@ -176,7 +177,8 @@ export class Hud {
         const tr = document.createElement("tr");
         if (r.id === myId) tr.className = "me";
         const crown = r.host ? "👑" : "";
-        tr.innerHTML = `<td>${crown}</td><td></td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.ping}ms</td><td>${r.forcedLagMs}ms</td>`;
+        const lag = `${r.forcedLagMs}ms (+${r.artificialLagMs}ms)`;
+        tr.innerHTML = `<td>${crown}</td><td></td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.ping}ms</td><td>${lag}</td>`;
         (tr.children[1] as HTMLElement).textContent = r.name;
         body.appendChild(tr);
       });

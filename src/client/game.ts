@@ -680,7 +680,7 @@ export class Game {
       this.hud.setHealth(ms.hp);
       this.hud.setWeapon(ms.weapon, ms.ammo, ms.reloading);
       this.setViewmodel(ms.weapon);
-      this.hud.setPing(this.net.rtt, ms.forcedLagMs, state.lagMode);
+      this.hud.setPing(this.net.rtt, ms.forcedLagMs, ms.artificialLagMs, state.lagMode);
       this.hud.setDead(!ms.alive && !roundEnded);
       if (!ms.alive && this.wasAlive) document.exitPointerLock?.();
       if (ms.alive && !this.wasAlive) this.audio.play("respawn", 0.5);
@@ -728,7 +728,7 @@ export class Game {
     this.hud.renderScoreboard(
       [...state.players.values()].map((p) => ({
         id: p.id, name: p.name, kills: p.kills, deaths: p.deaths,
-        ping: p.ping, forcedLagMs: p.forcedLagMs, host: p.host,
+        ping: p.ping, forcedLagMs: p.forcedLagMs, artificialLagMs: p.artificialLagMs, host: p.host,
       })),
       this.net.sessionId,
       state.code,

@@ -55,11 +55,12 @@ final leaderboard until the host starts the next round.
 ## How the lag works
 
 - Clients ping the server every 2 s to measure **natural RTT** (shown on the scoreboard).
-- **Forced lag** is applied server-side: every input (movement, aim, trigger
-  pulls) is queued and only applied to the authoritative sim after that
-  player's current delay. In host-controlled mode everyone shares the selected
-  delay. In kill-lag mode each player's delay is `kills × milliseconds per
-  kill`, limited only when the creator sets a cap.
+- **Forced lag** is a target one-way input latency. The server subtracts half
+  of each player's smoothed natural RTT and queues inputs for the remaining
+  artificial delay. Players already above their target receive no added delay.
+  In host-controlled mode everyone shares the selected target. In kill-lag
+  mode each player's target is `kills × milliseconds per kill`, limited only
+  when the creator sets a cap.
 - There is deliberately **no client-side prediction**: your own body obeys you
   late. Your mouse *look* stays instant (so 10 s of lag is funny instead of
   nauseating), but where your shots go is decided by where you were aiming when

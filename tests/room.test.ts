@@ -214,6 +214,10 @@ describe("FpsRoom", () => {
     await sendAndProcess(room, c, MSG.rtt, { ms: 87 });
     await until(() => c.state.players?.get(c.sessionId)?.ping === 87);
 
+    await sendAndProcess(room, c, MSG.setLag, { ms: 100 });
+    await until(() => c.state.players?.get(c.sessionId)?.artificialLagMs === 57);
+    expect(c.state.players.get(c.sessionId)?.forcedLagMs).toBe(100);
+
     await c.leave();
   });
 

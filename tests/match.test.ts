@@ -115,6 +115,33 @@ describe("movement and forced lag", () => {
     p.kills = 20;
     expect(m.getPlayerLagMs("a")).toBe(400);
   });
+
+  it("subtracts half of natural RTT from the target input latency", () => {
+    const m = new Match(1);
+    const p = m.addPlayer("a", "A", 0);
+    m.setForcedLag(50);
+    m.setPlayerRtt("a", 25);
+
+    expect(m.getPlayerLagMs("a")).toBe(50);
+    expect(m.getPlayerArtificialLagMs("a")).toBe(38);
+
+    m.enqueueInput("a", input({ moveZ: 1 }));
+    expect(p.queue[0].applyAt).toBe(38);
+  });
+
+  it("adds no artificial delay when natural one-way latency exceeds the target", () => {
+    const m = new Match(1);
+    const p = m.addPlayer("a", "A", 0);
+    m.setKillLag(50);
+    p.kills = 1;
+    m.setPlayerRtt("a", 120);
+
+    expect(m.getPlayerLagMs("a")).toBe(50);
+    expect(m.getPlayerArtificialLagMs("a")).toBe(0);
+
+    m.enqueueInput("a", input({ moveZ: 1 }));
+    expect(p.queue[0].applyAt).toBe(0);
+  });
 });
 
 describe("weapon pickups", () => {

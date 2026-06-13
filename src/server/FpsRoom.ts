@@ -58,7 +58,10 @@ export class FpsRoom extends Room<GameState> {
 
     this.onMessage(MSG.rtt, (client, msg: { ms: number }) => {
       const p = this.state.players.get(client.sessionId);
-      if (p) p.ping = Math.max(0, Math.min(65535, Math.round(msg?.ms ?? 0)));
+      if (!p) return;
+      const rttMs = Math.max(0, Math.min(65535, Math.round(msg?.ms ?? 0)));
+      p.ping = rttMs;
+      this.match.setPlayerRtt(client.sessionId, rttMs);
     });
 
     this.onMessage(MSG.setLag, (client, msg: { ms: number }) => {
@@ -172,6 +175,7 @@ export class FpsRoom extends Room<GameState> {
       ps.ammo = p.ammo;
       ps.reloading = p.reloading;
       ps.forcedLagMs = this.match.getPlayerLagMs(id);
+      ps.artificialLagMs = this.match.getPlayerArtificialLagMs(id);
     }
 
     syncMap(this.match.pickups, s.pickups, (p) => {

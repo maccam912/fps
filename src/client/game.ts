@@ -7,7 +7,8 @@ import {
   HemisphericLight, DirectionalLight, ShadowGenerator,
   MeshBuilder, StandardMaterial, Texture, DynamicTexture,
   TransformNode, AbstractMesh, Mesh, ParticleSystem, PointLight,
-  Vector4, LoadAssetContainerAsync, AssetContainer,
+  Vector4, LoadAssetContainerAsync, AssetContainer, PBRMaterial,
+  DefaultRenderingPipeline, GlowLayer, ImageProcessingConfiguration,
 } from "@babylonjs/core";
 import "@babylonjs/loaders/glTF";
 
@@ -95,41 +96,83 @@ export class Game {
 
   private buildWorld(): void {
     const s = this.scene;
-    s.clearColor = new Color4(0.05, 0.07, 0.12, 1);
+    s.clearColor = new Color4(0.018, 0.027, 0.05, 1);
+    s.ambientColor = new Color3(0.08, 0.11, 0.17);
     s.fogMode = Scene.FOGMODE_LINEAR;
-    s.fogStart = 60;
-    s.fogEnd = 160;
-    s.fogColor = new Color3(0.05, 0.07, 0.12);
+    s.fogStart = 52;
+    s.fogEnd = 125;
+    s.fogColor = new Color3(0.035, 0.055, 0.09);
+
+    const image = s.imageProcessingConfiguration;
+    image.toneMappingEnabled = true;
+    image.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    image.exposure = 1.08;
+    image.contrast = 1.16;
+    image.vignetteEnabled = true;
+    image.vignetteWeight = 1.35;
+    image.vignetteColor = new Color4(0.015, 0.025, 0.05, 1);
+    image.vignetteBlendMode = ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;
+
+    const pipeline = new DefaultRenderingPipeline("main-pipeline", true, s, [this.camera]);
+    pipeline.fxaaEnabled = true;
+    pipeline.bloomEnabled = true;
+    pipeline.bloomThreshold = 0.82;
+    pipeline.bloomWeight = 0.18;
+    pipeline.bloomKernel = 48;
+    pipeline.samples = 2;
+
+    const glow = new GlowLayer("arena-glow", s, { blurKernelSize: 24 });
+    glow.intensity = 0.42;
 
     const hemi = new HemisphericLight("hemi", new Vector3(0.2, 1, 0.1), s);
-    hemi.intensity = 0.75;
-    hemi.groundColor = new Color3(0.25, 0.22, 0.3);
+    hemi.intensity = 0.58;
+    hemi.diffuse = new Color3(0.55, 0.68, 0.9);
+    hemi.groundColor = new Color3(0.12, 0.1, 0.18);
 
     const sun = new DirectionalLight("sun", new Vector3(-0.5, -1, 0.35), s);
     sun.position = new Vector3(30, 50, -25);
-    sun.intensity = 0.9;
+    sun.diffuse = new Color3(0.78, 0.86, 1);
+    sun.intensity = 1.35;
+    sun.shadowMinZ = 1;
+    sun.shadowMaxZ = 110;
     this.shadows = new ShadowGenerator(2048, sun);
     this.shadows.usePercentageCloserFiltering = true;
+    this.shadows.filteringQuality = ShadowGenerator.QUALITY_HIGH;
+    this.shadows.bias = 0.0005;
+    this.shadows.normalBias = 0.03;
+    this.shadows.setDarkness(0.32);
 
     // Kenney prototype textures are an 8m grid design: tile once per 8 meters.
     const TEX_M = 8;
 
     const ground = MeshBuilder.CreateGround("ground", { width: ARENA_SIZE + 2, height: ARENA_SIZE + 2 }, s);
-    const gmat = new StandardMaterial("gmat", s);
+    const gmat = new PBRMaterial("gmat", s);
     const gtex = new Texture(`/textures/proto-dark.png`, s);
     gtex.uScale = (ARENA_SIZE + 2) / TEX_M;
     gtex.vScale = (ARENA_SIZE + 2) / TEX_M;
-    gmat.diffuseTexture = gtex;
-    gmat.specularColor = Color3.Black();
+    gmat.albedoTexture = gtex;
+    gmat.albedoColor = new Color3(0.42, 0.48, 0.58);
+    gmat.metallic = 0.12;
+    gmat.roughness = 0.72;
+    gmat.environmentIntensity = 0.42;
+    gmat.maxSimultaneousLights = 8;
     ground.material = gmat;
     ground.receiveShadows = true;
 
     const texFiles: Record<string, string> = { a: "proto-orange", b: "proto-purple", c: "proto-green" };
-    const mats: Record<string, StandardMaterial> = {};
+    const mats: Record<string, PBRMaterial> = {};
     for (const v of ["a", "b", "c"]) {
-      const m = new StandardMaterial(`box-${v}`, s);
-      m.diffuseTexture = new Texture(`/textures/${texFiles[v]}.png`, s);
-      m.specularColor = Color3.Black();
+      const m = new PBRMaterial(`box-${v}`, s);
+      m.albedoTexture = new Texture(`/textures/${texFiles[v]}.png`, s);
+      m.albedoColor = v === "a"
+        ? new Color3(0.9, 0.68, 0.48)
+        : v === "b"
+          ? new Color3(0.62, 0.66, 0.82)
+          : new Color3(0.52, 0.78, 0.67);
+      m.metallic = v === "b" ? 0.2 : 0.08;
+      m.roughness = v === "b" ? 0.55 : 0.68;
+      m.environmentIntensity = 0.48;
+      m.maxSimultaneousLights = 8;
       mats[v] = m;
     }
 
@@ -147,6 +190,134 @@ export class Game {
       mesh.freezeWorldMatrix();
       this.shadows.addShadowCaster(mesh);
     });
+
+    this.buildSky();
+    this.buildArenaLighting();
+    this.buildAtmosphere();
+  }
+
+  private buildSky(): void {
+    const tex = new DynamicTexture("sky-gradient", { width: 32, height: 512 }, this.scene, false);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+    gradient.addColorStop(0, "#050914");
+    gradient.addColorStop(0.48, "#10213b");
+    gradient.addColorStop(0.72, "#1a3550");
+    gradient.addColorStop(1, "#35516a");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 32, 512);
+    tex.update();
+
+    const sky = MeshBuilder.CreateSphere("sky", {
+      diameter: 240,
+      segments: 24,
+      sideOrientation: Mesh.BACKSIDE,
+    }, this.scene);
+    const mat = new StandardMaterial("sky-mat", this.scene);
+    mat.emissiveTexture = tex;
+    mat.diffuseColor = Color3.Black();
+    mat.specularColor = Color3.Black();
+    mat.disableLighting = true;
+    mat.backFaceCulling = false;
+    sky.material = mat;
+    sky.applyFog = false;
+    sky.isPickable = false;
+    sky.infiniteDistance = true;
+  }
+
+  private buildArenaLighting(): void {
+    const cyan = new Color3(0.12, 0.82, 1);
+    const amber = new Color3(1, 0.36, 0.12);
+    const cyanMat = this.makeEmissiveMaterial("lane-cyan", cyan, 2.4);
+    const amberMat = this.makeEmissiveMaterial("lane-amber", amber, 2.8);
+
+    // Thin floor guides emphasize the central objective and cardinal lanes.
+    const strips: Array<[number, number, number, number, PBRMaterial]> = [
+      [-5.5, -5.5, 11, 0.08, cyanMat], [-5.5, 5.5, 11, 0.08, cyanMat],
+      [-5.5, 0, 0.08, 11, cyanMat], [5.5, 0, 0.08, 11, cyanMat],
+      [0, -18, 0.1, 13, amberMat], [0, 18, 0.1, 13, amberMat],
+      [-18, 0, 13, 0.1, amberMat], [18, 0, 13, 0.1, amberMat],
+    ];
+    strips.forEach(([x, z, width, depth, material], i) => {
+      const strip = MeshBuilder.CreateBox(`floor-guide-${i}`, { width, height: 0.035, depth }, this.scene);
+      strip.position.set(x, 0.025, z);
+      strip.material = material;
+      strip.isPickable = false;
+      strip.freezeWorldMatrix();
+    });
+
+    const fixtures: Array<[number, number, Color3]> = [
+      [-27, -27, cyan], [27, 27, cyan], [-27, 27, amber], [27, -27, amber],
+    ];
+    fixtures.forEach(([x, z, color], i) => {
+      const pole = MeshBuilder.CreateCylinder(`light-pole-${i}`, {
+        height: 3.6, diameter: 0.14, tessellation: 10,
+      }, this.scene);
+      pole.position.set(x, 1.8, z);
+      const poleMat = new PBRMaterial(`light-pole-mat-${i}`, this.scene);
+      poleMat.albedoColor = new Color3(0.08, 0.11, 0.16);
+      poleMat.metallic = 0.75;
+      poleMat.roughness = 0.32;
+      pole.material = poleMat;
+      pole.freezeWorldMatrix();
+
+      const lamp = MeshBuilder.CreateCylinder(`light-fixture-${i}`, {
+        height: 0.5, diameter: 0.28, tessellation: 12,
+      }, this.scene);
+      lamp.position.set(x, 3.65, z);
+      lamp.material = this.makeEmissiveMaterial(`fixture-mat-${i}`, color, 3.4);
+      lamp.isPickable = false;
+      lamp.freezeWorldMatrix();
+
+      const light = new PointLight(`arena-light-${i}`, new Vector3(x, 3.4, z), this.scene);
+      light.diffuse = color;
+      light.intensity = 10;
+      light.range = 18;
+    });
+  }
+
+  private buildAtmosphere(): void {
+    const tex = new DynamicTexture("dust-soft", { width: 32, height: 32 }, this.scene, false);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    gradient.addColorStop(0, "rgba(200,225,255,0.5)");
+    gradient.addColorStop(0.35, "rgba(120,190,255,0.18)");
+    gradient.addColorStop(1, "rgba(60,120,180,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 32, 32);
+    tex.update();
+    tex.hasAlpha = true;
+
+    const dust = new ParticleSystem("ambient-dust", 220, this.scene);
+    dust.particleTexture = tex;
+    dust.emitter = new Vector3(0, 3.5, 0);
+    dust.minEmitBox = new Vector3(-32, -2.8, -32);
+    dust.maxEmitBox = new Vector3(32, 3.5, 32);
+    dust.color1 = new Color4(0.4, 0.65, 0.9, 0.14);
+    dust.color2 = new Color4(0.75, 0.82, 1, 0.08);
+    dust.colorDead = new Color4(0.3, 0.45, 0.7, 0);
+    dust.minSize = 0.025;
+    dust.maxSize = 0.09;
+    dust.minLifeTime = 7;
+    dust.maxLifeTime = 13;
+    dust.emitRate = 16;
+    dust.gravity = new Vector3(0, 0.015, 0);
+    dust.direction1 = new Vector3(-0.08, 0.02, -0.08);
+    dust.direction2 = new Vector3(0.08, 0.08, 0.08);
+    dust.minEmitPower = 0.05;
+    dust.maxEmitPower = 0.15;
+    dust.blendMode = ParticleSystem.BLENDMODE_ADD;
+    dust.start();
+  }
+
+  private makeEmissiveMaterial(name: string, color: Color3, intensity: number): PBRMaterial {
+    const material = new PBRMaterial(name, this.scene);
+    material.albedoColor = color.scale(0.18);
+    material.emissiveColor = color.scale(intensity);
+    material.metallic = 0.35;
+    material.roughness = 0.3;
+    material.disableLighting = true;
+    return material;
   }
 
   private async loadAssets(): Promise<void> {

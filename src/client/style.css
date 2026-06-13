@@ -183,13 +183,10 @@ html, body {
 #health-num { font-size: 30px; font-weight: 900; text-shadow: 0 2px 4px #000; }
 
 #ammo-wrap { text-align: right; }
+#weapon-name { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 2px; margin-bottom: 3px; }
 #ammo-num { font-size: 44px; font-weight: 900; line-height: 1; text-shadow: 0 2px 4px #000; }
 #ammo-num.reloading { color: #ffd166; font-size: 26px; }
 #ammo-label { font-size: 10px; letter-spacing: 3px; color: #8da4b0; }
-#supplies { margin-top: 6px; font-size: 17px; letter-spacing: 2px; }
-#grenade-pips { color: #9ef3a1; margin-right: 10px; }
-#claymore-pips { color: #ffb84d; }
-
 #ping-readout {
   position: absolute; bottom: 4px; right: 8px; font-size: 11px; color: #6e8694;
   display: flex; gap: 10px;

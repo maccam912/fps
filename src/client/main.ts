@@ -34,6 +34,8 @@ async function join(code: string): Promise<void> {
       onKill: (m) => game.onKill(m),
       onExplosion: (m) => game.onExplosion(m),
       onShot: (m) => game.onShot(m),
+      onWeaponFx: (m) => game.onWeaponFx(m),
+      onPickup: (m) => game.onPickup(m),
       onHitConfirm: () => game.onHitConfirm(),
     });
 

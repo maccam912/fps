@@ -1,11 +1,20 @@
 // All DOM/HUD manipulation lives here so game.ts stays about the 3D scene.
 
-import type { KillCause } from "@shared/protocol";
+import { WEAPONS, type KillCause, type WeaponKind } from "@shared/protocol";
 
 const CAUSE_ICON: Record<KillCause, string> = {
   mg: "🔫",
   grenade: "💣",
   claymore: "💥",
+  rocket: "🚀",
+  ricochet: "◇",
+  cluster: "✹",
+  flamethrower: "🔥",
+  homingMine: "◉",
+  shock: "⚡",
+  sticky: "●",
+  turret: "▣",
+  plasma: "☄",
 };
 
 export interface ScoreRow {
@@ -57,15 +66,12 @@ export class Hud {
     this.lastHp = hp;
   }
 
-  setAmmo(ammo: number, reloading: boolean): void {
+  setWeapon(weapon: WeaponKind, ammo: number, reloading: boolean): void {
     const n = el("ammo-num");
     n.classList.toggle("reloading", reloading);
     n.textContent = reloading ? "RELOADING" : String(ammo);
-  }
-
-  setSupplies(grenades: number, claymores: number): void {
-    el("grenade-pips").textContent = "● ".repeat(grenades).trim() || "—";
-    el("claymore-pips").textContent = "▲ ".repeat(claymores).trim() || "—";
+    el("weapon-name").textContent = WEAPONS[weapon].label.toUpperCase();
+    el("ammo-label").textContent = weapon === "mg" ? "AMMO" : "CHARGES";
   }
 
   setPing(naturalMs: number, forcedMs: number): void {

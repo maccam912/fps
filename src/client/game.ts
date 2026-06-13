@@ -14,8 +14,8 @@ import "@babylonjs/loaders/glTF";
 
 import { MAP_BOXES, ARENA_SIZE } from "@shared/map";
 import { PLAYER, SKIN_COUNT, MAX_FORCED_LAG_MS } from "@shared/constants";
-import type { PlayerInput, ShotMsg, ExplosionMsg, KillMsg } from "@shared/protocol";
-import type { PlayerState } from "@shared/schema";
+import { WEAPONS, type PlayerInput, type ShotMsg, type ExplosionMsg, type KillMsg, type WeaponFxMsg, type PickupWeaponKind, type WeaponKind } from "@shared/protocol";
+import type { EntityState, PickupState, PlayerState } from "@shared/schema";
 import { Net } from "./net";
 import { Hud } from "./hud";
 import { AudioMan } from "./audio";
@@ -32,6 +32,14 @@ interface PlayerVisual {
   state: PlayerState;
   nameTag: Mesh;
   bobPhase: number;
+  held: TransformNode | null;
+  weapon: WeaponKind;
+}
+
+interface WorldVisual {
+  root: TransformNode;
+  state: EntityState;
+  lamp?: Mesh;
 }
 
 export class Game {
@@ -46,19 +54,18 @@ export class Game {
   private pitch = 0;
   private keys = new Set<string>();
   private firing = false;
-  private latched = { jump: false, throwGrenade: false, placeClaymore: false, reload: false };
+  private latched = { jump: false, reload: false };
   private seq = 0;
 
   private players = new Map<string, PlayerVisual>();
-  private grenadeMeshes = new Map<string, TransformNode>();
-  private claymoreMeshes = new Map<string, { root: TransformNode; lamp: Mesh }>();
+  private pickupMeshes = new Map<string, TransformNode>();
+  private entityMeshes = new Map<string, WorldVisual>();
 
   private characterContainers: (AssetContainer | null)[] = new Array(SKIN_COUNT).fill(null);
-  private grenadeContainer: AssetContainer | null = null;
-  private claymoreContainer: AssetContainer | null = null;
+  private weaponContainers = new Map<string, AssetContainer>();
 
   private viewmodel: TransformNode | null = null;
-  private heldGunContainer: AssetContainer | null = null;
+  private viewmodelKind: WeaponKind | "" = "";
   private recoil = 0;
   private shake = 0;
   private wasAlive = true;
@@ -322,27 +329,23 @@ export class Game {
 
   private async loadAssets(): Promise<void> {
     const s = this.scene;
-    const [blaster, heldGun, grenade, claymore, ...chars] = await Promise.all([
+    const [blasterD, blasterF, blasterI, grenadeA, grenadeB, target, ...chars] = await Promise.all([
+      LoadAssetContainerAsync("/models/blaster-d.glb", s),
       LoadAssetContainerAsync("/models/blaster-f.glb", s),
       LoadAssetContainerAsync("/models/blaster-i.glb", s),
       LoadAssetContainerAsync("/models/grenade-a.glb", s),
       LoadAssetContainerAsync("/models/grenade-b.glb", s),
+      LoadAssetContainerAsync("/models/target-large.glb", s),
       ...SKINS.map((c) => LoadAssetContainerAsync(`/models/character-${c}.glb`, s)),
     ]);
-    this.heldGunContainer = heldGun;
-    this.grenadeContainer = grenade;
-    this.claymoreContainer = claymore;
+    this.weaponContainers.set("blasterD", blasterD);
+    this.weaponContainers.set("blasterF", blasterF);
+    this.weaponContainers.set("blasterI", blasterI);
+    this.weaponContainers.set("grenadeA", grenadeA);
+    this.weaponContainers.set("grenadeB", grenadeB);
+    this.weaponContainers.set("target", target);
     chars.forEach((c, i) => (this.characterContainers[i] = c));
-
-    // First-person viewmodel: bolt the blaster to the camera.
-    blaster.addAllToScene();
-    const vm = new TransformNode("viewmodel", s);
-    const root = blaster.rootNodes[0] as TransformNode;
-    fitToSize(root, 0.5, "center"); // 0.5m along its longest axis (the barrel)
-    root.parent = vm;
-    vm.parent = this.camera;
-    vm.position.set(0.3, -0.28, 0.75);
-    this.viewmodel = vm;
+    this.setViewmodel("mg");
   }
 
   // ------------------------------------------------------------ state sync --
@@ -352,7 +355,10 @@ export class Game {
 
     $(room.state).players.onAdd((p, id) => {
       if (id !== this.net.sessionId) this.spawnPlayerVisual(p, id);
-      else this.players.set(id, { root: new TransformNode(`self`, this.scene), state: p, nameTag: null as unknown as Mesh, bobPhase: 0 });
+      else this.players.set(id, {
+        root: new TransformNode(`self`, this.scene), state: p,
+        nameTag: null as unknown as Mesh, bobPhase: 0, held: null, weapon: "mg",
+      });
     });
     $(room.state).players.onRemove((_p, id) => {
       const v = this.players.get(id);
@@ -363,47 +369,22 @@ export class Game {
       }
     });
 
-    $(room.state).grenades.onAdd((g, id) => {
-      if (!this.grenadeContainer) return;
-      const inst = this.grenadeContainer.instantiateModelsToScene((n) => `${id}-${n}`);
-      const root = inst.rootNodes[0] as TransformNode;
-      fitToSize(root, 0.35);
-      root.position.set(g.x, g.y, g.z);
-      const wrap = new TransformNode(`g-${id}`, this.scene);
-      root.parent = wrap;
-      this.grenadeMeshes.set(id, wrap);
-      wrap.position.set(g.x, g.y, g.z);
-      root.position.set(0, 0, 0);
+    $(room.state).pickups.onAdd((p, id) => {
+      const root = this.makePickupVisual(p, id);
+      this.pickupMeshes.set(id, root);
     });
-    $(room.state).grenades.onRemove((_g, id) => {
-      this.grenadeMeshes.get(id)?.dispose();
-      this.grenadeMeshes.delete(id);
+    $(room.state).pickups.onRemove((_p, id) => {
+      this.pickupMeshes.get(id)?.dispose();
+      this.pickupMeshes.delete(id);
     });
 
-    $(room.state).claymores.onAdd((c, id) => {
-      const wrap = new TransformNode(`c-${id}`, this.scene);
-      wrap.position.set(c.x, c.y, c.z);
-      wrap.rotation.y = c.yaw;
-      if (this.claymoreContainer) {
-        const inst = this.claymoreContainer.instantiateModelsToScene((n) => `${id}-${n}`);
-        const root = inst.rootNodes[0] as TransformNode;
-        fitToSize(root, 0.3);
-        root.parent = wrap;
-        root.position.y = 0.12;
-      }
-      const lamp = MeshBuilder.CreateSphere(`lamp-${id}`, { diameter: 0.09 }, this.scene);
-      const lm = new StandardMaterial(`lampm-${id}`, this.scene);
-      lm.emissiveColor = new Color3(0.2, 0.05, 0.05);
-      lm.disableLighting = true;
-      lamp.material = lm;
-      lamp.parent = wrap;
-      lamp.position.set(0, 0.32, 0);
-      this.claymoreMeshes.set(id, { root: wrap, lamp });
+    $(room.state).entities.onAdd((e, id) => {
+      this.entityMeshes.set(id, this.makeEntityVisual(e, id));
     });
-    $(room.state).claymores.onRemove((_c, id) => {
-      const v = this.claymoreMeshes.get(id);
+    $(room.state).entities.onRemove((_e, id) => {
+      const v = this.entityMeshes.get(id);
       v?.root.dispose();
-      this.claymoreMeshes.delete(id);
+      this.entityMeshes.delete(id);
     });
   }
 
@@ -421,20 +402,13 @@ export class Game {
       charRoot.getChildMeshes().forEach((m) => this.shadows.addShadowCaster(m));
     }
 
-    // give them a gun to wave around
-    if (this.heldGunContainer) {
-      const gunInst = this.heldGunContainer.instantiateModelsToScene((n) => `${id}-gun-${n}`);
-      const gun = gunInst.rootNodes[0] as TransformNode;
-      fitToSize(gun, 0.6, "center");
-      gun.parent = root;
-      gun.position.set(0.25, 1.05, 0.3); // right hand, pointing forward
-    }
+    const held = this.attachHeldWeapon(root, id, p.weapon);
 
     const nameTag = this.makeNameTag(p.name, id);
     nameTag.parent = root;
     nameTag.position.y = PLAYER.height + 0.35;
 
-    this.players.set(id, { root, state: p, nameTag, bobPhase: Math.random() * 6 });
+    this.players.set(id, { root, state: p, nameTag, bobPhase: Math.random() * 6, held, weapon: p.weapon });
   }
 
   private makeNameTag(name: string, id: string): Mesh {
@@ -504,8 +478,6 @@ export class Game {
       const k = e.code;
       this.keys.add(k);
       if (k === "Space") { this.latched.jump = true; e.preventDefault(); }
-      if (k === "KeyG") this.latched.throwGrenade = true;
-      if (k === "KeyF") this.latched.placeClaymore = true;
       if (k === "KeyR") this.latched.reload = true;
       if (k === "Tab") { this.hud.setScoreboardVisible(true); e.preventDefault(); }
       if (k === "KeyL" && this.isHost()) {
@@ -535,11 +507,9 @@ export class Game {
       pitch: this.pitch,
       jump: this.latched.jump || this.keys.has("Space"),
       fire: this.firing,
-      throwGrenade: this.latched.throwGrenade,
-      placeClaymore: this.latched.placeClaymore,
       reload: this.latched.reload,
     };
-    this.latched = { jump: false, throwGrenade: false, placeClaymore: false, reload: false };
+    this.latched = { jump: false, reload: false };
     this.net.sendInput(input);
   }
 
@@ -582,6 +552,18 @@ export class Game {
     this.audio.play("hit", 0.25);
   }
 
+  onWeaponFx(m: WeaponFxMsg): void {
+    if (m.kind === "teleportFx") {
+      this.explosionFx(m.x, m.y, m.z, new Color3(0.3, 0.8, 1));
+      this.audio.play("respawn", 0.7);
+    }
+  }
+
+  onPickup(m: { kind: PickupWeaponKind }): void {
+    this.hud.banner(`${WEAPONS[m.kind].label.toUpperCase()} ACQUIRED`, 1600);
+    this.audio.play("join", 0.7);
+  }
+
   // ---------------------------------------------------------------- frame ---
 
   private update(dt: number): void {
@@ -597,6 +579,11 @@ export class Game {
       else Vector3.LerpToRef(v.root.position, target, k, v.root.position);
 
       if (!isMe) {
+        if (v.weapon !== p.weapon) {
+          v.held?.dispose();
+          v.held = this.attachHeldWeapon(v.root, id, p.weapon);
+          v.weapon = p.weapon;
+        }
         v.root.rotation.y = lerpAngle(v.root.rotation.y, p.yaw, k);
         const meshVisible = p.alive;
         v.root.setEnabled(meshVisible);
@@ -625,8 +612,8 @@ export class Game {
 
       const ms = me.state;
       this.hud.setHealth(ms.hp);
-      this.hud.setAmmo(ms.ammo, ms.reloading);
-      this.hud.setSupplies(ms.grenades, ms.claymores);
+      this.hud.setWeapon(ms.weapon, ms.ammo, ms.reloading);
+      this.setViewmodel(ms.weapon);
       this.hud.setPing(this.net.rtt, state.forcedLagMs);
       this.hud.setDead(!ms.alive);
       if (!ms.alive && this.wasAlive) document.exitPointerLock?.();
@@ -649,23 +636,26 @@ export class Game {
       this.viewmodel.rotation.x = -this.recoil * 0.06;
     }
 
-    // grenades roll, claymores blink
-    for (const [id, wrap] of this.grenadeMeshes) {
-      const g = state.grenades.get(id);
-      if (!g) continue;
-      const target = new Vector3(g.x, g.y, g.z);
-      if (Vector3.Distance(wrap.position, target) > SNAP_DIST) wrap.position.copyFrom(target);
-      else Vector3.LerpToRef(wrap.position, target, 1 - Math.exp(-20 * dt), wrap.position);
-      wrap.rotation.x += dt * 6;
+    for (const [id, root] of this.pickupMeshes) {
+      if (!state.pickups.get(id)) continue;
+      root.rotation.y += dt * 1.8;
+      root.position.y = 0.35 + Math.sin(performance.now() / 350 + Number(id.slice(1))) * 0.08;
     }
     const blinkOn = Math.sin(performance.now() / 110) > 0;
-    for (const [id, v] of this.claymoreMeshes) {
-      const c = state.claymores.get(id);
-      if (!c) continue;
-      const mat = v.lamp.material as StandardMaterial;
-      mat.emissiveColor = c.armed && blinkOn
-        ? new Color3(1, 0.1, 0.1)
-        : new Color3(0.18, 0.04, 0.04);
+    for (const [id, v] of this.entityMeshes) {
+      const e = state.entities.get(id);
+      if (!e) continue;
+      const target = new Vector3(e.x, e.y, e.z);
+      if (Vector3.Distance(v.root.position, target) > SNAP_DIST) v.root.position.copyFrom(target);
+      else Vector3.LerpToRef(v.root.position, target, 1 - Math.exp(-20 * dt), v.root.position);
+      v.root.rotation.y = e.yaw;
+      if (["grenade", "teleport", "bomblet"].includes(e.kind)) v.root.rotation.x += dt * 6;
+      if (v.lamp) {
+        const mat = v.lamp.material as StandardMaterial;
+        mat.emissiveColor = e.phase === "armed" && blinkOn
+          ? new Color3(1, 0.1, 0.1)
+          : new Color3(0.18, 0.04, 0.04);
+      }
     }
 
     // scoreboard + win banner
@@ -687,6 +677,94 @@ export class Game {
     return this.net.room.state.players.get(this.net.sessionId);
   }
 
+  private setViewmodel(kind: WeaponKind): void {
+    if (this.viewmodelKind === kind) return;
+    this.viewmodel?.dispose();
+    this.viewmodelKind = kind;
+    const vm = new TransformNode("viewmodel", this.scene);
+    vm.parent = this.camera;
+    vm.position.set(0.3, -0.28, 0.75);
+    const key = modelKey(kind);
+    const container = this.weaponContainers.get(key);
+    if (container) {
+      const inst = container.instantiateModelsToScene((n) => `vm-${kind}-${n}`);
+      const root = inst.rootNodes[0] as TransformNode;
+      fitToSize(root, key.startsWith("grenade") ? 0.32 : 0.5, "center");
+      root.parent = vm;
+    }
+    this.viewmodel = vm;
+  }
+
+  private attachHeldWeapon(parent: TransformNode, id: string, kind: WeaponKind): TransformNode | null {
+    const container = this.weaponContainers.get(modelKey(kind));
+    if (!container) return null;
+    const inst = container.instantiateModelsToScene((n) => `${id}-held-${kind}-${n}`);
+    const root = inst.rootNodes[0] as TransformNode;
+    fitToSize(root, modelKey(kind).startsWith("grenade") ? 0.3 : 0.6, "center");
+    root.parent = parent;
+    root.position.set(0.25, 1.05, 0.3);
+    return root;
+  }
+
+  private makePickupVisual(p: PickupState, id: string): TransformNode {
+    const wrap = new TransformNode(`pickup-${id}`, this.scene);
+    wrap.position.set(p.x, 0.35, p.z);
+    const ring = MeshBuilder.CreateTorus(`pickup-ring-${id}`, { diameter: 1.15, thickness: 0.07 }, this.scene);
+    ring.parent = wrap;
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = -0.28;
+    ring.material = this.emissiveMaterial(`pickup-mat-${id}`, weaponColor(p.kind));
+
+    const container = this.weaponContainers.get(modelKey(p.kind as WeaponKind));
+    if (container) {
+      const inst = container.instantiateModelsToScene((n) => `${id}-${n}`);
+      const root = inst.rootNodes[0] as TransformNode;
+      fitToSize(root, 0.65, "center");
+      root.parent = wrap;
+    }
+    return wrap;
+  }
+
+  private makeEntityVisual(e: EntityState, id: string): WorldVisual {
+    const wrap = new TransformNode(`entity-${id}`, this.scene);
+    wrap.position.set(e.x, e.y, e.z);
+    wrap.rotation.y = e.yaw;
+    const key = modelKey(e.kind as WeaponKind);
+    const container = this.weaponContainers.get(key);
+    if (container && ["grenade", "teleport", "claymore", "sticky", "homingMine", "turret"].includes(e.kind)) {
+      const inst = container.instantiateModelsToScene((n) => `${id}-${n}`);
+      const root = inst.rootNodes[0] as TransformNode;
+      fitToSize(root, e.kind === "turret" ? 0.75 : 0.3, e.kind === "turret" ? "feet" : "center");
+      root.parent = wrap;
+    } else {
+      const mesh = ["rocket", "cluster", "ricochet"].includes(e.kind)
+        ? MeshBuilder.CreateCapsule(`body-${id}`, { height: 0.5, radius: 0.1 }, this.scene)
+        : e.kind === "flame"
+          ? MeshBuilder.CreateCylinder(`body-${id}`, { height: 0.05, diameter: 3.8 }, this.scene)
+          : MeshBuilder.CreateSphere(`body-${id}`, { diameter: e.kind === "plasma" ? 0.75 : 0.28 }, this.scene);
+      mesh.parent = wrap;
+      mesh.material = this.emissiveMaterial(`entity-mat-${id}`, weaponColor(e.kind));
+      if (e.kind === "flame") mesh.position.y = 0.03;
+    }
+
+    let lamp: Mesh | undefined;
+    if (["claymore", "homingMine", "turret", "sticky"].includes(e.kind)) {
+      lamp = MeshBuilder.CreateSphere(`lamp-${id}`, { diameter: 0.09 }, this.scene);
+      lamp.material = this.emissiveMaterial(`lamp-mat-${id}`, new Color3(0.2, 0.05, 0.05));
+      lamp.parent = wrap;
+      lamp.position.y = e.kind === "turret" ? 0.75 : 0.32;
+    }
+    return { root: wrap, state: e, lamp };
+  }
+
+  private emissiveMaterial(name: string, color: Color3): StandardMaterial {
+    const mat = new StandardMaterial(name, this.scene);
+    mat.diffuseColor = color.scale(0.35);
+    mat.emissiveColor = color;
+    mat.disableLighting = true;
+    return mat;
+  }
+
   // ------------------------------------------------------------------ fx ----
 
   private tracer(m: ShotMsg): void {
@@ -696,7 +774,9 @@ export class Game {
     if (len < 0.1) return;
     const beam = MeshBuilder.CreateBox("tracer", { width: 0.025, height: 0.025, depth: len }, this.scene);
     const mat = new StandardMaterial("tm", this.scene);
-    mat.emissiveColor = m.hit ? new Color3(1, 0.45, 0.2) : new Color3(1, 0.9, 0.4);
+    mat.emissiveColor = m.kind === "shock"
+      ? new Color3(0.3, 0.8, 1)
+      : m.hit ? new Color3(1, 0.45, 0.2) : new Color3(1, 0.9, 0.4);
     mat.disableLighting = true;
     mat.alpha = 0.85;
     beam.material = mat;
@@ -722,7 +802,7 @@ export class Game {
     return dt;
   }
 
-  private explosionFx(x: number, y: number, z: number): void {
+  private explosionFx(x: number, y: number, z: number, color = new Color3(1, 0.6, 0.25)): void {
     const pos = new Vector3(x, Math.max(0.3, y), z);
 
     const ps = new ParticleSystem("boom", 90, this.scene);
@@ -747,7 +827,7 @@ export class Game {
     setTimeout(() => ps.stop(), 120);
 
     const light = new PointLight("boomlight", pos.add(new Vector3(0, 1, 0)), this.scene);
-    light.diffuse = new Color3(1, 0.6, 0.25);
+    light.diffuse = color;
     light.intensity = 18;
     light.range = 18;
     const fade = setInterval(() => {
@@ -797,4 +877,32 @@ function lerpAngle(a: number, b: number, t: number): number {
 /** simple linear distance attenuation */
 function att(d: number, range: number): number {
   return Math.max(0, 1 - d / range);
+}
+
+function modelKey(kind: WeaponKind | string): string {
+  if (["grenade", "teleport", "sticky", "cluster"].includes(kind)) return kind === "teleport" ? "grenadeB" : "grenadeA";
+  if (["claymore", "homingMine", "turret"].includes(kind)) return "target";
+  if (["rocket", "shock", "plasma"].includes(kind)) return "blasterD";
+  if (["ricochet", "flamethrower"].includes(kind)) return "blasterF";
+  return "blasterI";
+}
+
+function weaponColor(kind: string): Color3 {
+  const colors: Record<string, Color3> = {
+    grenade: new Color3(0.3, 1, 0.35),
+    claymore: new Color3(1, 0.55, 0.15),
+    rocket: new Color3(1, 0.2, 0.1),
+    ricochet: new Color3(1, 0.25, 0.85),
+    cluster: new Color3(1, 0.8, 0.15),
+    flamethrower: new Color3(1, 0.35, 0.05),
+    flame: new Color3(1, 0.25, 0.02),
+    homingMine: new Color3(0.8, 0.15, 0.15),
+    shock: new Color3(0.2, 0.75, 1),
+    sticky: new Color3(0.65, 1, 0.2),
+    turret: new Color3(0.7, 0.7, 1),
+    plasma: new Color3(0.45, 0.2, 1),
+    teleport: new Color3(0.15, 0.9, 1),
+    bomblet: new Color3(1, 0.75, 0.1),
+  };
+  return colors[kind] ?? new Color3(1, 0.8, 0.3);
 }

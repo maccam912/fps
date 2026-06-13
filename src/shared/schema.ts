@@ -1,4 +1,5 @@
 import { Schema, MapSchema, type } from "@colyseus/schema";
+import type { WeaponKind } from "./protocol";
 
 export class PlayerState extends Schema {
   @type("string") id = "";
@@ -18,36 +19,36 @@ export class PlayerState extends Schema {
   @type("uint16") kills = 0;
   @type("uint16") deaths = 0;
 
-  @type("uint8") ammo = 50;
+  @type("string") weapon: WeaponKind = "mg";
+  @type("uint16") ammo = 50;
   @type("boolean") reloading = false;
-  @type("uint8") grenades = 3;
-  @type("uint8") claymores = 2;
 
   @type("uint16") ping = 0; // natural RTT in ms, self-reported by the client
 }
 
-export class GrenadeState extends Schema {
+export class PickupState extends Schema {
   @type("string") id = "";
-  @type("string") ownerId = "";
+  @type("string") kind = "";
   @type("number") x = 0;
   @type("number") y = 0;
   @type("number") z = 0;
 }
 
-export class ClaymoreState extends Schema {
+export class EntityState extends Schema {
   @type("string") id = "";
+  @type("string") kind = "";
   @type("string") ownerId = "";
   @type("number") x = 0;
   @type("number") y = 0;
   @type("number") z = 0;
   @type("number") yaw = 0;
-  @type("boolean") armed = false;
+  @type("string") phase = "";
 }
 
 export class GameState extends Schema {
   @type({ map: PlayerState }) players = new MapSchema<PlayerState>();
-  @type({ map: GrenadeState }) grenades = new MapSchema<GrenadeState>();
-  @type({ map: ClaymoreState }) claymores = new MapSchema<ClaymoreState>();
+  @type({ map: PickupState }) pickups = new MapSchema<PickupState>();
+  @type({ map: EntityState }) entities = new MapSchema<EntityState>();
 
   @type("string") hostId = "";
   @type("uint16") forcedLagMs = 0;

@@ -1,5 +1,5 @@
 import { Room, Client } from "@colyseus/core";
-import { GameState, PlayerState, GrenadeState, ClaymoreState } from "@shared/schema";
+import { EntityState, GameState, PickupState, PlayerState } from "@shared/schema";
 import { MSG, PlayerInput, KillMsg } from "@shared/protocol";
 import { TICK_MS, PATCH_MS, MAX_FORCED_LAG_MS, SKIN_COUNT } from "@shared/constants";
 import { Match } from "../sim/Match";
@@ -95,9 +95,18 @@ export class FpsRoom extends Room<GameState> {
           break;
         case "shot":
           this.broadcast(MSG.shot, {
-            id: ev.id, ox: ev.ox, oy: ev.oy, oz: ev.oz, tx: ev.tx, ty: ev.ty, tz: ev.tz, hit: ev.hit,
+            id: ev.id, kind: ev.kind,
+            ox: ev.ox, oy: ev.oy, oz: ev.oz, tx: ev.tx, ty: ev.ty, tz: ev.tz, hit: ev.hit,
           });
           break;
+        case "weaponFx":
+          this.broadcast(MSG.weaponFx, ev);
+          break;
+        case "pickup": {
+          const c = this.clients.find((cl) => cl.sessionId === ev.playerId);
+          c?.send(MSG.pickup, { kind: ev.kind });
+          break;
+        }
         case "hit": {
           const c = this.clients.find((cl) => cl.sessionId === ev.shooterId);
           c?.send(MSG.hitConfirm, { damage: ev.damage });
@@ -123,34 +132,34 @@ export class FpsRoom extends Room<GameState> {
       ps.alive = p.alive;
       ps.kills = p.kills;
       ps.deaths = p.deaths;
+      ps.weapon = p.weapon;
       ps.ammo = p.ammo;
       ps.reloading = p.reloading;
-      ps.grenades = p.grenades;
-      ps.claymores = p.claymores;
     }
 
-    syncMap(this.match.grenades, s.grenades, (g) => {
-      const gs = new GrenadeState();
-      gs.id = g.id;
-      gs.ownerId = g.ownerId;
-      return gs;
-    }, (g, gs) => {
-      gs.x = round2(g.pos.x);
-      gs.y = round2(g.pos.y);
-      gs.z = round2(g.pos.z);
+    syncMap(this.match.pickups, s.pickups, (p) => {
+      const ps = new PickupState();
+      ps.id = p.id;
+      ps.kind = p.kind;
+      return ps;
+    }, (p, ps) => {
+      ps.x = round2(p.pos.x);
+      ps.y = round2(p.pos.y);
+      ps.z = round2(p.pos.z);
     });
 
-    syncMap(this.match.claymores, s.claymores, (c) => {
-      const cs = new ClaymoreState();
-      cs.id = c.id;
-      cs.ownerId = c.ownerId;
-      cs.x = round2(c.pos.x);
-      cs.y = round2(c.pos.y);
-      cs.z = round2(c.pos.z);
-      cs.yaw = round3(c.yaw);
-      return cs;
-    }, (c, cs) => {
-      cs.armed = c.armed;
+    syncMap(this.match.entities, s.entities, (e) => {
+      const es = new EntityState();
+      es.id = e.id;
+      es.kind = e.kind;
+      es.ownerId = e.ownerId;
+      return es;
+    }, (e, es) => {
+      es.x = round2(e.pos.x);
+      es.y = round2(e.pos.y);
+      es.z = round2(e.pos.z);
+      es.yaw = round3(e.yaw);
+      es.phase = e.phase;
     });
 
     s.winnerId = this.match.winnerId;
@@ -192,8 +201,6 @@ function sanitizeInput(i: PlayerInput): PlayerInput {
     pitch: clamp(Number(i.pitch) || 0, -1.5, 1.5),
     jump: !!i.jump,
     fire: !!i.fire,
-    throwGrenade: !!i.throwGrenade,
-    placeClaymore: !!i.placeClaymore,
     reload: !!i.reload,
   };
 }

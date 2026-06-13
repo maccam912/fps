@@ -1,6 +1,6 @@
 // Headless end-to-end: boot the production server (serves built client + ws),
 // join two browser clients to one party, walk, crank the forced lag to 2s and
-// prove inputs are delayed, throw a grenade, screenshot everything.
+// prove inputs are delayed, verify weapon pickups, and screenshot everything.
 //
 // Prereq: `npm run build:client` (the server serves dist/client).
 import puppeteer from "puppeteer-core";
@@ -83,6 +83,9 @@ try {
 
   await pollFor(a, () => window.__lagwar.net.room.state.players.size === 2, { label: "both players visible" });
   console.log("✓ both players in one party room");
+  const pickupCount = await a.evaluate(() => window.__lagwar.net.room.state.pickups.size);
+  if (pickupCount !== 4) fail(`expected 4 weapon pickups, saw ${pickupCount}`);
+  else console.log("✓ four random weapon pickups spawned");
 
   const myPos = (page) =>
     page.evaluate(() => {
@@ -134,23 +137,14 @@ try {
   if (dist(p2, p4) < 0.5) fail("delayed input never applied");
   else console.log(`✓ the walk arrived ~2s late (moved ${dist(p2, p4).toFixed(1)}m)`);
 
-  // ---- grenade (still under 2s lag)
-  await a.keyboard.press("KeyG");
-  await pollFor(a, () => window.__lagwar.net.room.state.grenades.size > 0, {
-    timeout: 8000, label: "grenade spawned",
-  });
-  console.log("✓ grenade thrown (2s late, naturally)");
-  await pollFor(a, () => window.__lagwar.net.room.state.grenades.size === 0, {
-    timeout: 8000, label: "grenade exploded",
-  });
-  console.log("✓ grenade exploded");
-
-  // ---- claymore
-  await b.keyboard.press("KeyF");
-  await pollFor(b, () => window.__lagwar.net.room.state.claymores.size > 0, {
-    timeout: 8000, label: "claymore placed",
-  });
-  console.log("✓ claymore placed");
+  // ---- unified weapon HUD and primary fire
+  const weaponLabel = await a.$eval("#weapon-name", (el) => el.textContent);
+  if (!weaponLabel) fail("active weapon label missing");
+  else console.log(`✓ unified weapon HUD active (${weaponLabel})`);
+  await a.mouse.down();
+  await sleep(300);
+  await a.mouse.up();
+  console.log("✓ primary fire sent through the unified weapon input");
 
   // ---- scoreboard + screenshots
   await a.keyboard.down("Tab");

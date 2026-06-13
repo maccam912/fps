@@ -24,7 +24,7 @@ beforeEach(async () => {
 
 const IDLE = {
   seq: 0, moveX: 0, moveZ: 0, yaw: 0, pitch: 0,
-  jump: false, fire: false, throwGrenade: false, placeClaymore: false, reload: false,
+  jump: false, fire: false, reload: false,
 };
 
 // NOTE: @colyseus/testing 0.16.3's client-side waitForNextPatch hooks a method
@@ -58,6 +58,7 @@ describe("FpsRoom", () => {
     expect(c1.state.players.get(c1.sessionId)?.host).toBe(true);
     expect(c1.state.players.get(c2.sessionId)?.host).toBe(false);
     expect(c1.state.players.get(c1.sessionId)?.name).toBe("Matt");
+    expect(c1.state.pickups.size).toBe(4);
 
     await c2.leave();
     await c1.leave();

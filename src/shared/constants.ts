@@ -27,31 +27,9 @@ export const MG = {
   reloadMs: 1600,
 } as const;
 
-export const GRENADE = {
-  throwSpeed: 17,
-  throwUpward: 4.5, // extra vertical kick
-  fuseMs: 2500,
-  radius: 0.18, // physical size
-  blastRadius: 5.5,
-  fullDamageRadius: 1.0, // direct hits devastate
-  maxDamage: 95,
-  restitution: 0.45,
-  friction: 0.7, // horizontal damping per bounce
-  gravity: 18,
-  maxCarried: 3,
-  restockMs: 6000, // regain one every N ms
-} as const;
-
-export const CLAYMORE = {
-  armMs: 1500,
-  triggerRadius: 2.6,
-  blastRadius: 4.5,
-  fullDamageRadius: 3.2, // anyone who trips it dies
-  damage: 100,
-  placeDistance: 1.2,
-  maxCarried: 2,
-  restockMs: 10_000,
-} as const;
+export const PICKUP_ACTIVE_COUNT = 4;
+export const PICKUP_RESPAWN_MS = 12_000;
+export const PICKUP_RADIUS = 1.1;
 
 // Explosions sympathetically detonate other explosives within this range.
 export const CHAIN_RADIUS = 3.0;

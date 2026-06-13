@@ -1,6 +1,6 @@
 import { Client, Room, getStateCallbacks } from "colyseus.js";
 import type { GameState } from "@shared/schema";
-import { MSG, PlayerInput, KillMsg, ExplosionMsg, ShotMsg } from "@shared/protocol";
+import { MSG, PlayerInput, KillMsg, ExplosionMsg, ShotMsg, WeaponFxMsg, PickupWeaponKind } from "@shared/protocol";
 import { ROOM_NAME } from "@shared/constants";
 
 const PING_INTERVAL_MS = 2000;
@@ -17,6 +17,8 @@ export interface NetEvents {
   onKill?: (m: KillMsg) => void;
   onExplosion?: (m: ExplosionMsg) => void;
   onShot?: (m: ShotMsg) => void;
+  onWeaponFx?: (m: WeaponFxMsg) => void;
+  onPickup?: (m: { kind: PickupWeaponKind }) => void;
   onHitConfirm?: (m: { damage: number }) => void;
 }
 
@@ -46,6 +48,8 @@ export class Net {
     this.room.onMessage(MSG.kill, (m: KillMsg) => events.onKill?.(m));
     this.room.onMessage(MSG.explosion, (m: ExplosionMsg) => events.onExplosion?.(m));
     this.room.onMessage(MSG.shot, (m: ShotMsg) => events.onShot?.(m));
+    this.room.onMessage(MSG.weaponFx, (m: WeaponFxMsg) => events.onWeaponFx?.(m));
+    this.room.onMessage(MSG.pickup, (m: { kind: PickupWeaponKind }) => events.onPickup?.(m));
     this.room.onMessage(MSG.hitConfirm, (m: { damage: number }) => events.onHitConfirm?.(m));
 
     const ping = () => this.room.send(MSG.ping, { t: performance.now() });

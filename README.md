@@ -6,11 +6,18 @@ seconds** of artificial latency for *everyone* in the match. At 200 ms it feels
 like bad wifi. At 3 s it's slapstick. At 10 s it's a turn-based game played in
 real time.
 
-Because precise aim is hopeless under heavy lag, the arsenal is built for chaos:
+Because precise aim is hopeless under heavy lag, the arena continuously spawns
+four random weapon pickups. Walk over one to replace your current weapon.
+Pickup ammo persists through death; when it runs out, you return to the machine
+gun.
 
-- 🔫 **Machine gun** — 12.5 rounds/sec with a wild spray cone. Hose an area, walk away, listen for the kill feed.
-- 💣 **Grenades** (G) — 2.5 s fuse, big blast, restock over time. Fire and forget.
-- 💥 **Claymores** (F) — plant, arm in 1.5 s, anyone who trips one dies. Explosions chain-detonate nearby explosives.
+- **Machine gun** — default automatic hitscan weapon.
+- **Grenades and claymores** — ordinary pickup weapons fired with LMB.
+- **Rocket, ricochet, cluster, flame, homing mine, shock, sticky, turret,
+  plasma, and teleport weapons** — finite-ammo chaos built around prediction,
+  area denial, and delayed consequences.
+
+Explosions chain-detonate nearby explosives.
 
 Built with **Babylon.js** (3D client), **Colyseus** (authoritative server),
 TypeScript everywhere. Art & audio by [Kenney](https://kenney.nl) (CC0).
@@ -29,8 +36,6 @@ is in the link). Friends on your network/host can join the same code.
 | --- | --- |
 | WASD / mouse | move / aim |
 | LMB | fire (hold) |
-| G | throw grenade |
-| F | plant claymore |
 | R | reload |
 | Space | jump |
 | Tab | scoreboard (kills, deaths, natural ping) |
@@ -68,7 +73,7 @@ npm run typecheck
 npm run build:client && npm run smoke   # headless 2-player end-to-end w/ screenshots
 ```
 
-The whole game (movement, weapons, lag buffer, rounds) lives in
+The whole game (movement, pickups, weapons, lag buffer, rounds) lives in
 `src/sim/Match.ts` as a deterministic `tick(dt)` class with zero engine/network
 imports — the Colyseus room and the Babylon client are thin shells around it.
 
@@ -76,4 +81,5 @@ imports — the Colyseus room and the Babylon client are thin shells around it.
 
 All models, textures and sounds are CC0 assets by [Kenney](https://kenney.nl):
 Blaster Kit, Blocky Characters, Prototype Textures, Sci-Fi Sounds, Impact
-Sounds, Interface Sounds, Music Loops.
+Sounds, Interface Sounds, and Music Loops. Weapon variants reuse Blaster Kit
+models with distinct emissive effects and Babylon.js primitives.

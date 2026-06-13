@@ -19,12 +19,33 @@ export function worldBoxes(): Box[] {
   }));
 }
 
-function overlaps(a: Box, b: Box): boolean {
+export function overlaps(a: Box, b: Box): boolean {
   return (
     a.minX < b.maxX && a.maxX > b.minX &&
     a.minY < b.maxY && a.maxY > b.minY &&
     a.minZ < b.maxZ && a.maxZ > b.minZ
   );
+}
+
+export function pointInBox(p: Vec3, b: Box, pad = 0): boolean {
+  return p.x >= b.minX - pad && p.x <= b.maxX + pad &&
+    p.y >= b.minY - pad && p.y <= b.maxY + pad &&
+    p.z >= b.minZ - pad && p.z <= b.maxZ + pad;
+}
+
+export function safePlayerPosition(pos: Vec3, boxes: Box[]): boolean {
+  if (pos.y < 0) return false;
+  const pb = playerBox(pos);
+  return !boxes.some((b) => overlaps(pb, b));
+}
+
+export function reflect(v: Vec3, normal: Vec3): Vec3 {
+  const dot = v.x * normal.x + v.y * normal.y + v.z * normal.z;
+  return {
+    x: v.x - 2 * dot * normal.x,
+    y: v.y - 2 * dot * normal.y,
+    z: v.z - 2 * dot * normal.z,
+  };
 }
 
 // Player collision box from feet position.

@@ -1,27 +1,29 @@
-// The whole game, headless and deterministic. No Colyseus, no Babylon — a full
-// match can be played in a unit test by calling tick() in a loop.
-//
-// THE LAG MACHINE: every input is queued with applyAt = now + forcedLagMs and
-// only touches the world once sim time passes that stamp. Relative timing
-// between a player's inputs is preserved, so at 10s of forced lag your whole
-// performance plays back faithfully — ten seconds too late.
+// Deterministic authoritative match simulation. Inputs, pickups, projectiles,
+// deployables, damage, and forced lag all advance only through tick().
 
 import {
-  PLAYER, MG, GRENADE, CLAYMORE, CHAIN_RADIUS,
-  KILL_TARGET, ROUND_RESET_MS, MAX_FORCED_LAG_MS,
+  PLAYER, MG, CHAIN_RADIUS, KILL_TARGET, ROUND_RESET_MS, MAX_FORCED_LAG_MS,
+  PICKUP_ACTIVE_COUNT, PICKUP_RADIUS, PICKUP_RESPAWN_MS,
 } from "@shared/constants";
-import { SPAWN_POINTS } from "@shared/map";
-import type { PlayerInput } from "@shared/protocol";
-import type { KillCause } from "@shared/protocol";
+import { PICKUP_POINTS, SPAWN_POINTS } from "@shared/map";
+import {
+  PICKUP_WEAPONS, WEAPONS,
+  type KillCause, type PickupWeaponKind, type PlayerInput, type WeaponKind,
+} from "@shared/protocol";
 import { mulberry32 } from "@shared/rng";
 import {
-  Box, Vec3, worldBoxes, movePlayer, playerBox, rayBox, rayWorld, dist3, lookDir,
+  type Box, type Vec3, dist3, lookDir, movePlayer, playerBox, rayBox, rayWorld,
+  safePlayerPosition, worldBoxes,
 } from "./physics";
 
 const IDLE_INPUT: PlayerInput = {
   seq: 0, moveX: 0, moveZ: 0, yaw: 0, pitch: 0,
-  jump: false, fire: false, throwGrenade: false, placeClaymore: false, reload: false,
+  jump: false, fire: false, reload: false,
 };
+
+type EntityKind =
+  | "grenade" | "claymore" | "rocket" | "ricochet" | "cluster" | "bomblet"
+  | "flame" | "homingMine" | "sticky" | "turret" | "plasma" | "teleport";
 
 interface QueuedInput { applyAt: number; input: PlayerInput }
 
@@ -31,6 +33,8 @@ export interface SimPlayer {
   skin: number;
   pos: Vec3;
   vy: number;
+  pushX: number;
+  pushZ: number;
   yaw: number;
   pitch: number;
   moving: boolean;
@@ -39,25 +43,49 @@ export interface SimPlayer {
   respawnAt: number;
   kills: number;
   deaths: number;
+  weapon: WeaponKind;
   ammo: number;
   reloading: boolean;
   reloadEndsAt: number;
   lastFireAt: number;
-  grenades: number;
-  grenadeRestockAt: number;
-  claymores: number;
-  claymoreRestockAt: number;
+  triggerPressed: boolean;
   cur: PlayerInput;
   queue: QueuedInput[];
 }
 
-export interface SimGrenade { id: string; ownerId: string; pos: Vec3; vel: Vec3; explodeAt: number }
-export interface SimClaymore { id: string; ownerId: string; pos: Vec3; yaw: number; armsAt: number; armed: boolean }
+export interface SimPickup {
+  id: string;
+  pad: number;
+  kind: PickupWeaponKind;
+  pos: Vec3;
+}
+
+export interface SimEntity {
+  id: string;
+  kind: EntityKind;
+  ownerId: string;
+  pos: Vec3;
+  vel: Vec3;
+  yaw: number;
+  phase: string;
+  createdAt: number;
+  expiresAt: number;
+  nextAt: number;
+  bounces: number;
+  targetId?: string;
+  attachedTo?: string;
+  offset?: Vec3;
+}
 
 export type SimEvent =
   | { type: "kill"; killerId: string; victimId: string; cause: KillCause }
-  | { type: "explosion"; x: number; y: number; z: number; kind: "grenade" | "claymore" }
-  | { type: "shot"; id: string; ox: number; oy: number; oz: number; tx: number; ty: number; tz: number; hit: boolean }
+  | { type: "explosion"; x: number; y: number; z: number; kind: KillCause }
+  | {
+      type: "shot"; id: string; kind: WeaponKind;
+      ox: number; oy: number; oz: number; tx: number; ty: number; tz: number; hit: boolean;
+    }
+  | { type: "weaponFx"; kind: WeaponKind | "teleportFx"; x: number; y: number; z: number; tx?: number; ty?: number; tz?: number }
+  | { type: "pickup"; playerId: string; kind: PickupWeaponKind }
   | { type: "hit"; shooterId: string; victimId: string; damage: number }
   | { type: "spawn"; id: string }
   | { type: "win"; id: string }
@@ -67,32 +95,32 @@ export class Match {
   timeMs = 0;
   forcedLagMs = 0;
   players = new Map<string, SimPlayer>();
-  grenades = new Map<string, SimGrenade>();
-  claymores = new Map<string, SimClaymore>();
+  pickups = new Map<string, SimPickup>();
+  entities = new Map<string, SimEntity>();
   winnerId = "";
   private roundResetAt = 0;
   private events: SimEvent[] = [];
   private boxes: Box[] = worldBoxes();
   private rng: () => number;
   private nextId = 1;
+  private pickupRespawns = new Map<number, number>();
 
   constructor(seed = 1234) {
     this.rng = mulberry32(seed);
+    this.fillPickupPads();
   }
-
-  // ---- lifecycle -----------------------------------------------------------
 
   addPlayer(id: string, name: string, skin: number): SimPlayer {
     const spawn = this.pickSpawn();
     const p: SimPlayer = {
       id, name, skin,
       pos: { x: spawn.x, y: 0, z: spawn.z },
-      vy: 0, yaw: spawn.yaw, pitch: 0, moving: false,
+      vy: 0, pushX: 0, pushZ: 0,
+      yaw: spawn.yaw, pitch: 0, moving: false,
       hp: PLAYER.hp, alive: true, respawnAt: 0,
       kills: 0, deaths: 0,
-      ammo: MG.magSize, reloading: false, reloadEndsAt: 0, lastFireAt: -1e9,
-      grenades: GRENADE.maxCarried, grenadeRestockAt: 0,
-      claymores: CLAYMORE.maxCarried, claymoreRestockAt: 0,
+      weapon: "mg", ammo: MG.magSize, reloading: false, reloadEndsAt: 0,
+      lastFireAt: -1e9, triggerPressed: false,
       cur: { ...IDLE_INPUT, yaw: spawn.yaw },
       queue: [],
     };
@@ -102,19 +130,19 @@ export class Match {
 
   removePlayer(id: string): void {
     this.players.delete(id);
-    for (const [cid, c] of this.claymores) if (c.ownerId === id) this.claymores.delete(cid);
+    for (const [eid, e] of this.entities) {
+      if (e.ownerId === id || e.attachedTo === id) this.entities.delete(eid);
+    }
   }
 
   setForcedLag(ms: number): void {
     this.forcedLagMs = Math.max(0, Math.min(MAX_FORCED_LAG_MS, Math.round(ms)));
   }
 
-  /** Queue an input; it takes effect forcedLagMs of sim time from now. */
   enqueueInput(id: string, input: PlayerInput): void {
     const p = this.players.get(id);
     if (!p) return;
     const applyAt = this.timeMs + this.forcedLagMs;
-    // Keep the queue sorted even if the host lowers the lag mid-flight.
     let i = p.queue.length;
     while (i > 0 && p.queue[i - 1].applyAt > applyAt) i--;
     p.queue.splice(i, 0, { applyAt, input });
@@ -126,18 +154,15 @@ export class Match {
     return out;
   }
 
-  // ---- main loop -----------------------------------------------------------
-
   tick(dtMs: number): void {
     this.timeMs += dtMs;
     const dt = dtMs / 1000;
-
     for (const p of this.players.values()) {
       this.applyDueInputs(p);
       this.stepPlayer(p, dt);
     }
-    this.stepGrenades(dt);
-    this.stepClaymores();
+    this.stepPickups();
+    this.stepEntities(dt);
     this.stepRound();
   }
 
@@ -146,33 +171,30 @@ export class Match {
       const { input } = p.queue.shift()!;
       const prev = p.cur;
       p.cur = input;
-      if (!p.alive || this.winnerId) continue;
-      // Edge-triggered actions fire at the moment of application.
-      if (input.throwGrenade && !prev.throwGrenade) this.throwGrenade(p, input);
-      if (input.placeClaymore && !prev.placeClaymore) this.placeClaymore(p, input);
-      if (input.reload && !prev.reload) this.startReload(p);
+      if (input.fire && !prev.fire) p.triggerPressed = true;
+      if (input.reload && !prev.reload && p.alive && !this.winnerId) this.startReload(p);
     }
   }
 
   private stepPlayer(p: SimPlayer, dt: number): void {
-    // Respawn
     if (!p.alive) {
+      p.triggerPressed = false;
       if (this.timeMs >= p.respawnAt) this.respawn(p);
-      else return;
+      return;
     }
 
     const inp = p.cur;
     p.yaw = inp.yaw;
     p.pitch = inp.pitch;
-
-    // Horizontal movement in look-yaw space
     let mx = inp.moveX, mz = inp.moveZ;
     const len = Math.hypot(mx, mz);
     if (len > 1) { mx /= len; mz /= len; }
     const sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
-    const dx = (mx * cos + mz * sin) * PLAYER.speed * dt;
-    const dz = (-mx * sin + mz * cos) * PLAYER.speed * dt;
+    const dx = (mx * cos + mz * sin) * PLAYER.speed * dt + p.pushX * dt;
+    const dz = (-mx * sin + mz * cos) * PLAYER.speed * dt + p.pushZ * dt;
     p.moving = len > 0.01;
+    p.pushX *= Math.exp(-5 * dt);
+    p.pushZ *= Math.exp(-5 * dt);
 
     p.vy -= PLAYER.gravity * dt;
     const { grounded, hitHead } = movePlayer(p.pos, dx, p.vy * dt, dz, this.boxes);
@@ -180,217 +202,506 @@ export class Match {
     if (hitHead && p.vy > 0) p.vy = 0;
     if (grounded && inp.jump) p.vy = PLAYER.jumpVel;
 
-    // Reload completion
     if (p.reloading && this.timeMs >= p.reloadEndsAt) {
       p.reloading = false;
       p.ammo = MG.magSize;
     }
-    // Auto-reload on empty
-    if (p.ammo === 0 && !p.reloading) this.startReload(p);
+    if (p.weapon === "mg" && p.ammo === 0 && !p.reloading) this.startReload(p);
 
-    // Restocks
-    if (p.grenades < GRENADE.maxCarried && this.timeMs >= p.grenadeRestockAt) {
-      p.grenades++;
-      p.grenadeRestockAt = this.timeMs + GRENADE.restockMs;
-    }
-    if (p.claymores < CLAYMORE.maxCarried && this.timeMs >= p.claymoreRestockAt) {
-      p.claymores++;
-      p.claymoreRestockAt = this.timeMs + CLAYMORE.restockMs;
-    }
-
-    // Full-auto fire. Catch-up loop so the true rate survives tick quantization.
-    if (inp.fire && !p.reloading && p.ammo > 0 && !this.winnerId) {
-      if (this.timeMs - p.lastFireAt > MG.fireIntervalMs * 2) {
-        p.lastFireAt = this.timeMs - MG.fireIntervalMs; // fresh trigger pull
+    const def = WEAPONS[p.weapon];
+    const wantsFire = def.automatic ? inp.fire : p.triggerPressed;
+    if (wantsFire && !p.reloading && p.ammo > 0 && !this.winnerId) {
+      if (def.automatic && this.timeMs - p.lastFireAt > def.cooldownMs * 2) {
+        p.lastFireAt = this.timeMs - def.cooldownMs;
       }
-      while (p.ammo > 0 && this.timeMs - p.lastFireAt >= MG.fireIntervalMs) {
-        p.lastFireAt += MG.fireIntervalMs;
+      while (p.ammo > 0 && this.timeMs - p.lastFireAt >= def.cooldownMs) {
+        p.lastFireAt += def.cooldownMs;
         p.ammo--;
-        this.fireShot(p);
+        this.fireWeapon(p);
+        if (!def.automatic) break;
       }
+    }
+    p.triggerPressed = false;
+    if (p.weapon !== "mg" && p.ammo === 0) this.equip(p, "mg");
+  }
+
+  private fireWeapon(p: SimPlayer): void {
+    switch (p.weapon) {
+      case "mg": this.fireHitscan(p, "mg", MG.damage, MG.range, MG.spreadRad); break;
+      case "grenade": this.spawnBallistic(p, "grenade", 17, 4.5, 2500); break;
+      case "claymore": this.placeEntity(p, "claymore", 1.2, 1500); break;
+      case "rocket": this.spawnProjectile(p, "rocket", 20, 5000); break;
+      case "ricochet": this.spawnProjectile(p, "ricochet", 40, 3000); break;
+      case "cluster": this.spawnProjectile(p, "cluster", 18, 4000); break;
+      case "flamethrower": this.fireFlame(p); break;
+      case "homingMine": this.placeEntity(p, "homingMine", 1.2, 1000); break;
+      case "shock": this.fireShock(p); break;
+      case "sticky": this.spawnProjectile(p, "sticky", 24, 5000); break;
+      case "turret": this.placeEntity(p, "turret", 1.2, 1000); break;
+      case "plasma": this.spawnProjectile(p, "plasma", 5, 6000); break;
+      case "teleport": this.spawnBallistic(p, "teleport", 15, 4, 1500); break;
     }
   }
 
-  private fireShot(p: SimPlayer): void {
-    const origin: Vec3 = { x: p.pos.x, y: p.pos.y + PLAYER.eyeHeight, z: p.pos.z };
-    // Wild spray: random offset inside a cone
-    const a = this.rng() * Math.PI * 2;
-    const r = this.rng() * MG.spreadRad;
-    const dir = lookDir(p.yaw + Math.cos(a) * r, p.pitch + Math.sin(a) * r);
+  private origin(p: SimPlayer): Vec3 {
+    return { x: p.pos.x, y: p.pos.y + PLAYER.eyeHeight, z: p.pos.z };
+  }
 
-    const wallDist = rayWorld(origin, dir, this.boxes, MG.range);
+  private fireHitscan(p: SimPlayer, kind: WeaponKind, damage: number, range: number, spread = 0): SimPlayer | null {
+    const origin = this.origin(p);
+    let yaw = p.yaw, pitch = p.pitch;
+    if (spread > 0) {
+      const a = this.rng() * Math.PI * 2;
+      const r = this.rng() * spread;
+      yaw += Math.cos(a) * r;
+      pitch += Math.sin(a) * r;
+    }
+    const dir = lookDir(yaw, pitch);
+    const wallDist = rayWorld(origin, dir, this.boxes, range);
     let victim: SimPlayer | null = null;
     let victimDist = wallDist;
     for (const q of this.players.values()) {
       if (q.id === p.id || !q.alive) continue;
       const t = rayBox(origin, dir, playerBox(q.pos), victimDist);
-      if (t !== null && t < victimDist) {
-        victim = q;
-        victimDist = t;
-      }
+      if (t !== null && t < victimDist) { victim = q; victimDist = t; }
     }
-
-    const end = {
-      x: origin.x + dir.x * victimDist,
-      y: origin.y + dir.y * victimDist,
-      z: origin.z + dir.z * victimDist,
-    };
+    const end = add(origin, scale(dir, victimDist));
     this.events.push({
-      type: "shot", id: p.id,
+      type: "shot", id: p.id, kind,
       ox: origin.x, oy: origin.y, oz: origin.z,
       tx: end.x, ty: end.y, tz: end.z, hit: victim !== null,
     });
+    if (victim) this.damage(victim, damage, p.id, kind as KillCause);
+    return victim;
+  }
 
-    if (victim) this.damage(victim, MG.damage, p.id, "mg");
+  private fireShock(p: SimPlayer): void {
+    const victim = this.fireHitscan(p, "shock", 15, 24);
+    if (!victim) return;
+    const dir = lookDir(p.yaw, 0);
+    victim.pushX += dir.x * 15;
+    victim.pushZ += dir.z * 15;
+    victim.vy = Math.max(victim.vy, 6);
+  }
+
+  private fireFlame(p: SimPlayer): void {
+    const origin = this.origin(p);
+    const dir = lookDir(p.yaw, p.pitch);
+    const at = add(origin, scale(dir, 3.5));
+    at.y = Math.max(0.05, Math.min(at.y, 1));
+    this.createEntity("flame", p.id, at, zero(), p.yaw, "burning", 3000, 250);
+    this.events.push({ type: "weaponFx", kind: "flamethrower", x: origin.x, y: origin.y, z: origin.z, tx: at.x, ty: at.y, tz: at.z });
+    for (const q of this.players.values()) {
+      if (!q.alive || q.id === p.id) continue;
+      const to = sub({ x: q.pos.x, y: q.pos.y + 0.9, z: q.pos.z }, origin);
+      const d = length(to);
+      if (d <= 7 && dot(normalize(to), dir) > 0.82) this.damage(q, 10, p.id, "flamethrower");
+    }
+  }
+
+  private spawnProjectile(p: SimPlayer, kind: EntityKind, speed: number, lifeMs: number): void {
+    const origin = this.origin(p);
+    const dir = lookDir(p.yaw, p.pitch);
+    const e = this.createEntity(kind, p.id, add(origin, scale(dir, 0.7)), scale(dir, speed), p.yaw, "flying", lifeMs, 0);
+    this.events.push({ type: "weaponFx", kind: kind as WeaponKind, x: origin.x, y: origin.y, z: origin.z, tx: e.pos.x, ty: e.pos.y, tz: e.pos.z });
+  }
+
+  private spawnBallistic(p: SimPlayer, kind: "grenade" | "teleport", speed: number, upward: number, fuseMs: number): void {
+    const origin = this.origin(p);
+    const dir = lookDir(p.yaw, p.pitch);
+    this.createEntity(
+      kind, p.id, add(origin, scale(dir, 0.6)),
+      { x: dir.x * speed, y: dir.y * speed + upward, z: dir.z * speed },
+      p.yaw, "flying", fuseMs, 0,
+    );
+  }
+
+  private placeEntity(p: SimPlayer, kind: "claymore" | "homingMine" | "turret", distance: number, armMs: number): void {
+    const dir = lookDir(p.yaw, 0);
+    const pos = { x: p.pos.x + dir.x * distance, y: p.pos.y, z: p.pos.z + dir.z * distance };
+    const lifeMs = kind === "turret" ? 20_000 : kind === "homingMine" ? 18_000 : 600_000;
+    this.createEntity(kind, p.id, pos, zero(), p.yaw, "arming", lifeMs, armMs);
+  }
+
+  private createEntity(
+    kind: EntityKind, ownerId: string, pos: Vec3, vel: Vec3, yaw: number,
+    phase: string, lifeMs: number, nextDelay: number,
+  ): SimEntity {
+    const id = `e${this.nextId++}`;
+    const e: SimEntity = {
+      id, kind, ownerId, pos: { ...pos }, vel: { ...vel }, yaw, phase,
+      createdAt: this.timeMs, expiresAt: this.timeMs + lifeMs,
+      nextAt: this.timeMs + nextDelay, bounces: 0,
+    };
+    this.entities.set(id, e);
+    return e;
+  }
+
+  private stepPickups(): void {
+    for (const p of this.players.values()) {
+      if (!p.alive) continue;
+      for (const pickup of [...this.pickups.values()]) {
+        if (dist3(p.pos, pickup.pos) > PICKUP_RADIUS + PLAYER.radius) continue;
+        this.equip(p, pickup.kind);
+        this.pickups.delete(pickup.id);
+        this.pickupRespawns.set(pickup.pad, this.timeMs + PICKUP_RESPAWN_MS);
+        this.events.push({ type: "pickup", playerId: p.id, kind: pickup.kind });
+        break;
+      }
+    }
+    for (const [pad, at] of [...this.pickupRespawns]) {
+      if (this.timeMs < at || this.pickups.size >= PICKUP_ACTIVE_COUNT) continue;
+      const point = PICKUP_POINTS[pad];
+      const occupied = [...this.players.values()].some((p) => p.alive && dist3(p.pos, point) < 2);
+      if (occupied) {
+        this.pickupRespawns.set(pad, this.timeMs + 1000);
+        continue;
+      }
+      this.spawnPickup(pad);
+      this.pickupRespawns.delete(pad);
+    }
+  }
+
+  private fillPickupPads(): void {
+    this.pickups.clear();
+    this.pickupRespawns.clear();
+    const pads = PICKUP_POINTS.map((_p, i) => i);
+    shuffle(pads, this.rng);
+    for (const pad of pads.slice(0, PICKUP_ACTIVE_COUNT)) this.spawnPickup(pad);
+  }
+
+  private spawnPickup(pad: number): void {
+    const active = new Set([...this.pickups.values()].map((p) => p.kind));
+    const available = PICKUP_WEAPONS.filter((kind) => !active.has(kind));
+    const pool = available.length > 0 ? available : PICKUP_WEAPONS;
+    const kind = pool[Math.floor(this.rng() * pool.length)];
+    const point = PICKUP_POINTS[pad];
+    this.pickups.set(`p${pad}`, { id: `p${pad}`, pad, kind, pos: { ...point } });
+  }
+
+  private equip(p: SimPlayer, weapon: WeaponKind): void {
+    p.weapon = weapon;
+    p.ammo = weapon === "mg" ? MG.magSize : WEAPONS[weapon].ammo;
+    p.reloading = false;
+    p.lastFireAt = this.timeMs - WEAPONS[weapon].cooldownMs;
   }
 
   private startReload(p: SimPlayer): void {
-    if (p.reloading || p.ammo === MG.magSize) return;
+    if (p.weapon !== "mg" || p.reloading || p.ammo === MG.magSize) return;
     p.reloading = true;
     p.reloadEndsAt = this.timeMs + MG.reloadMs;
   }
 
-  private throwGrenade(p: SimPlayer, inp: PlayerInput): void {
-    if (p.grenades <= 0) return;
-    if (p.grenades === GRENADE.maxCarried) p.grenadeRestockAt = this.timeMs + GRENADE.restockMs;
-    p.grenades--;
-    const dir = lookDir(inp.yaw, inp.pitch);
-    const id = `g${this.nextId++}`;
-    this.grenades.set(id, {
-      id, ownerId: p.id,
-      pos: { x: p.pos.x + dir.x * 0.6, y: p.pos.y + PLAYER.eyeHeight - 0.1, z: p.pos.z + dir.z * 0.6 },
-      vel: {
-        x: dir.x * GRENADE.throwSpeed,
-        y: dir.y * GRENADE.throwSpeed + GRENADE.throwUpward,
-        z: dir.z * GRENADE.throwSpeed,
-      },
-      explodeAt: this.timeMs + GRENADE.fuseMs,
-    });
-  }
-
-  private placeClaymore(p: SimPlayer, inp: PlayerInput): void {
-    if (p.claymores <= 0) return;
-    if (p.claymores === CLAYMORE.maxCarried) p.claymoreRestockAt = this.timeMs + CLAYMORE.restockMs;
-    p.claymores--;
-    const dir = lookDir(inp.yaw, 0);
-    const id = `c${this.nextId++}`;
-    this.claymores.set(id, {
-      id, ownerId: p.id,
-      pos: { x: p.pos.x + dir.x * CLAYMORE.placeDistance, y: p.pos.y, z: p.pos.z + dir.z * CLAYMORE.placeDistance },
-      yaw: inp.yaw,
-      armsAt: this.timeMs + CLAYMORE.armMs,
-      armed: false,
-    });
-  }
-
-  private stepGrenades(dt: number): void {
-    for (const g of [...this.grenades.values()]) {
-      if (this.timeMs >= g.explodeAt) {
-        this.grenades.delete(g.id);
-        this.explode(g.pos, GRENADE.blastRadius, GRENADE.fullDamageRadius, GRENADE.maxDamage, g.ownerId, "grenade");
-        continue;
+  private stepEntities(dt: number): void {
+    for (const e of [...this.entities.values()]) {
+      if (!this.entities.has(e.id)) continue;
+      switch (e.kind) {
+        case "grenade": this.stepGrenade(e, dt, false); break;
+        case "teleport": this.stepGrenade(e, dt, true); break;
+        case "claymore": this.stepClaymore(e); break;
+        case "rocket": this.stepRocket(e, dt); break;
+        case "ricochet": this.stepRicochet(e, dt); break;
+        case "cluster": this.stepCluster(e, dt); break;
+        case "bomblet": this.stepBomblet(e, dt); break;
+        case "flame": this.stepFlame(e); break;
+        case "homingMine": this.stepHomingMine(e, dt); break;
+        case "sticky": this.stepSticky(e, dt); break;
+        case "turret": this.stepTurret(e); break;
+        case "plasma": this.stepPlasma(e, dt); break;
       }
-      g.vel.y -= GRENADE.gravity * dt;
-      const next = {
-        x: g.pos.x + g.vel.x * dt,
-        y: g.pos.y + g.vel.y * dt,
-        z: g.pos.z + g.vel.z * dt,
-      };
-      // Bounce: test each axis against world boxes + floor
-      const R = GRENADE.radius;
-      const gb: Box = {
-        minX: next.x - R, maxX: next.x + R,
-        minY: next.y - R, maxY: next.y + R,
-        minZ: next.z - R, maxZ: next.z + R,
-      };
-      let bounced = false;
-      if (next.y - R <= 0) {
-        next.y = R;
-        g.vel.y = -g.vel.y * GRENADE.restitution;
-        g.vel.x *= GRENADE.friction;
-        g.vel.z *= GRENADE.friction;
-        if (Math.abs(g.vel.y) < 0.8) g.vel.y = 0;
-        bounced = true;
-      }
-      if (!bounced) {
-        for (const b of this.boxes) {
-          if (
-            gb.minX < b.maxX && gb.maxX > b.minX &&
-            gb.minY < b.maxY && gb.maxY > b.minY &&
-            gb.minZ < b.maxZ && gb.maxZ > b.minZ
-          ) {
-            // Pick the axis of least penetration and reflect it.
-            const penX = Math.min(gb.maxX - b.minX, b.maxX - gb.minX);
-            const penY = Math.min(gb.maxY - b.minY, b.maxY - gb.minY);
-            const penZ = Math.min(gb.maxZ - b.minZ, b.maxZ - gb.minZ);
-            if (penY <= penX && penY <= penZ) {
-              g.vel.y = -g.vel.y * GRENADE.restitution;
-              next.y = g.pos.y;
-            } else if (penX <= penZ) {
-              g.vel.x = -g.vel.x * GRENADE.restitution;
-              next.x = g.pos.x;
-            } else {
-              g.vel.z = -g.vel.z * GRENADE.restitution;
-              next.z = g.pos.z;
-            }
-            break;
-          }
-        }
-      }
-      g.pos = next;
     }
   }
 
-  private stepClaymores(): void {
-    for (const c of [...this.claymores.values()]) {
-      if (!c.armed) {
-        if (this.timeMs >= c.armsAt) c.armed = true;
-        else continue;
+  private stepGrenade(e: SimEntity, dt: number, teleport: boolean): void {
+    if (this.timeMs >= e.expiresAt) {
+      this.entities.delete(e.id);
+      if (teleport) this.teleportOwner(e);
+      else this.explode(e.pos, 5.5, 1, 95, e.ownerId, "grenade");
+      return;
+    }
+    this.moveBouncing(e, dt, 18, 0.45, 0.7);
+  }
+
+  private stepClaymore(e: SimEntity): void {
+    if (this.timeMs >= e.expiresAt) { this.entities.delete(e.id); return; }
+    if (e.phase === "arming" && this.timeMs >= e.nextAt) e.phase = "armed";
+    if (e.phase !== "armed") return;
+    const target = this.nearestEnemy(e.ownerId, e.pos, 2.6);
+    if (target) {
+      this.entities.delete(e.id);
+      this.explode(e.pos, 4.5, 3.2, 100, e.ownerId, "claymore");
+    }
+  }
+
+  private stepRocket(e: SimEntity, dt: number): void {
+    const hit = this.moveLinear(e, dt, 0.2);
+    if (hit || this.timeMs >= e.expiresAt) {
+      this.entities.delete(e.id);
+      this.explode(e.pos, 4.5, 1, 100, e.ownerId, "rocket");
+    }
+  }
+
+  private stepRicochet(e: SimEntity, dt: number): void {
+    const victim = this.projectileVictim(e, dt);
+    if (victim) {
+      this.entities.delete(e.id);
+      this.damage(victim, 28, e.ownerId, "ricochet");
+      return;
+    }
+    const axis = this.movePoint(e, dt);
+    if (axis) {
+      e.vel[axis] *= -1;
+      e.bounces++;
+    }
+    if (e.bounces > 4 || this.timeMs >= e.expiresAt) this.entities.delete(e.id);
+  }
+
+  private stepCluster(e: SimEntity, dt: number): void {
+    if (this.moveLinear(e, dt, 0.2) || this.timeMs >= e.expiresAt) {
+      this.entities.delete(e.id);
+      for (let i = 0; i < 6; i++) {
+        const angle = this.rng() * Math.PI * 2;
+        const speed = 4 + this.rng() * 5;
+        this.createEntity(
+          "bomblet", e.ownerId, e.pos,
+          { x: Math.cos(angle) * speed, y: 4 + this.rng() * 4, z: Math.sin(angle) * speed },
+          angle, "flying", 800, 0,
+        );
       }
+    }
+  }
+
+  private stepBomblet(e: SimEntity, dt: number): void {
+    if (this.timeMs >= e.expiresAt) {
+      this.entities.delete(e.id);
+      this.explode(e.pos, 2.4, 0.5, 45, e.ownerId, "cluster");
+      return;
+    }
+    this.moveBouncing(e, dt, 18, 0.35, 0.72);
+  }
+
+  private stepFlame(e: SimEntity): void {
+    if (this.timeMs >= e.expiresAt) { this.entities.delete(e.id); return; }
+    if (this.timeMs < e.nextAt) return;
+    e.nextAt += 250;
+    for (const p of this.players.values()) {
+      if (p.alive && p.id !== e.ownerId && dist3(p.pos, e.pos) <= 2.2) {
+        this.damage(p, 8, e.ownerId, "flamethrower");
+      }
+    }
+  }
+
+  private stepHomingMine(e: SimEntity, dt: number): void {
+    if (this.timeMs >= e.expiresAt) { this.entities.delete(e.id); return; }
+    if (e.phase === "arming") {
+      if (this.timeMs >= e.nextAt) e.phase = "armed";
+      return;
+    }
+    const target = this.nearestEnemy(e.ownerId, e.pos, 30);
+    if (!target) return;
+    const d = sub(target.pos, e.pos);
+    if (length(d) <= 1.3 + PLAYER.radius) {
+      this.entities.delete(e.id);
+      this.explode(e.pos, 4, 1.2, 100, e.ownerId, "homingMine");
+      return;
+    }
+    const dir = normalize({ x: d.x, y: 0, z: d.z });
+    e.vel = scale(dir, 3.2);
+    this.movePoint(e, dt);
+    e.yaw = Math.atan2(dir.x, dir.z);
+  }
+
+  private stepSticky(e: SimEntity, dt: number): void {
+    if (e.phase === "flying") {
+      const victim = this.projectileVictim(e, dt);
+      if (victim) {
+        e.phase = "stuck";
+        e.attachedTo = victim.id;
+        e.offset = sub(e.pos, victim.pos);
+        e.vel = zero();
+        e.expiresAt = this.timeMs + 3000;
+      } else if (this.moveLinear(e, dt, 0.12)) {
+        e.phase = "stuck";
+        e.vel = zero();
+        e.expiresAt = this.timeMs + 3000;
+      }
+    } else if (e.attachedTo) {
+      const target = this.players.get(e.attachedTo);
+      if (target?.alive) e.pos = add(target.pos, e.offset ?? zero());
+    }
+    if (this.timeMs >= e.expiresAt) {
+      this.entities.delete(e.id);
+      this.explode(e.pos, 4.5, 1.5, 100, e.ownerId, "sticky");
+    }
+  }
+
+  private stepTurret(e: SimEntity): void {
+    if (this.timeMs >= e.expiresAt) { this.entities.delete(e.id); return; }
+    if (e.phase === "arming") {
+      if (this.timeMs >= e.nextAt) { e.phase = "armed"; e.nextAt = this.timeMs; }
+      return;
+    }
+    if (this.timeMs < e.nextAt) return;
+    e.nextAt += 250;
+    const target = this.nearestEnemy(e.ownerId, e.pos, 22);
+    if (!target || !this.hasLineOfSight(e.pos, target)) return;
+    const origin = { x: e.pos.x, y: e.pos.y + 0.7, z: e.pos.z };
+    const center = { x: target.pos.x, y: target.pos.y + 0.9, z: target.pos.z };
+    const dir = normalize(sub(center, origin));
+    e.yaw = Math.atan2(dir.x, dir.z);
+    this.events.push({
+      type: "shot", id: e.ownerId, kind: "turret",
+      ox: origin.x, oy: origin.y, oz: origin.z,
+      tx: center.x, ty: center.y, tz: center.z, hit: true,
+    });
+    this.damage(target, 6, e.ownerId, "turret");
+  }
+
+  private stepPlasma(e: SimEntity, dt: number): void {
+    if (this.timeMs >= e.nextAt) {
+      e.nextAt += 250;
       for (const p of this.players.values()) {
-        if (!p.alive || p.id === c.ownerId) continue;
-        const center = { x: p.pos.x, y: p.pos.y + PLAYER.height / 2, z: p.pos.z };
-        if (dist3(center, c.pos) <= CLAYMORE.triggerRadius + PLAYER.radius) {
-          this.claymores.delete(c.id);
-          this.explode(c.pos, CLAYMORE.blastRadius, CLAYMORE.fullDamageRadius, CLAYMORE.damage, c.ownerId, "claymore");
-          break;
+        if (p.alive && p.id !== e.ownerId && dist3(p.pos, e.pos) <= 4.5) {
+          this.damage(p, 8, e.ownerId, "plasma");
         }
       }
+    }
+    if (this.moveLinear(e, dt, 0.35) || this.timeMs >= e.expiresAt) {
+      this.entities.delete(e.id);
+      this.explode(e.pos, 7, 1.5, 90, e.ownerId, "plasma");
+    }
+  }
+
+  private projectileVictim(e: SimEntity, dt: number): SimPlayer | null {
+    const speed = length(e.vel);
+    if (speed < 0.001) return null;
+    const dir = scale(e.vel, 1 / speed);
+    const maxDist = speed * dt;
+    let victim: SimPlayer | null = null;
+    let best = maxDist;
+    for (const p of this.players.values()) {
+      if (!p.alive || p.id === e.ownerId) continue;
+      const t = rayBox(e.pos, dir, playerBox(p.pos), best);
+      if (t !== null && t < best) { victim = p; best = t; }
+    }
+    if (victim) e.pos = add(e.pos, scale(dir, best));
+    return victim;
+  }
+
+  private moveLinear(e: SimEntity, dt: number, radius: number): boolean {
+    const victim = this.projectileVictim(e, dt);
+    if (victim) {
+      if (e.kind === "sticky") return false;
+      return true;
+    }
+    const speed = length(e.vel);
+    if (speed < 0.001) return false;
+    const dir = scale(e.vel, 1 / speed);
+    const travel = speed * dt;
+    const wall = rayWorld(e.pos, dir, this.boxes, travel + radius);
+    if (wall < travel + radius - 1e-6) {
+      e.pos = add(e.pos, scale(dir, Math.max(0, wall - radius)));
+      return true;
+    }
+    e.pos = add(e.pos, scale(e.vel, dt));
+    return false;
+  }
+
+  private movePoint(e: SimEntity, dt: number): "x" | "y" | "z" | null {
+    const old = { ...e.pos };
+    const next = add(e.pos, scale(e.vel, dt));
+    if (next.y <= 0) { e.pos = { x: next.x, y: 0, z: next.z }; return "y"; }
+    const probe = 0.16;
+    for (const b of this.boxes) {
+      if (
+        next.x >= b.minX - probe && next.x <= b.maxX + probe &&
+        next.y >= b.minY - probe && next.y <= b.maxY + probe &&
+        next.z >= b.minZ - probe && next.z <= b.maxZ + probe
+      ) {
+        e.pos = old;
+        const dx = Math.min(Math.abs(old.x - b.minX), Math.abs(old.x - b.maxX));
+        const dy = Math.min(Math.abs(old.y - b.minY), Math.abs(old.y - b.maxY));
+        const dz = Math.min(Math.abs(old.z - b.minZ), Math.abs(old.z - b.maxZ));
+        return dx <= dy && dx <= dz ? "x" : dy <= dz ? "y" : "z";
+      }
+    }
+    e.pos = next;
+    return null;
+  }
+
+  private moveBouncing(e: SimEntity, dt: number, gravity: number, restitution: number, friction: number): void {
+    e.vel.y -= gravity * dt;
+    const axis = this.movePoint(e, dt);
+    if (!axis) return;
+    e.vel[axis] *= -restitution;
+    if (axis === "y") {
+      e.vel.x *= friction;
+      e.vel.z *= friction;
+      if (Math.abs(e.vel.y) < 0.8) e.vel.y = 0;
     }
   }
 
   private explode(
-    at: Vec3,
-    radius: number,
-    fullDamageRadius: number,
-    maxDamage: number,
-    ownerId: string,
-    kind: "grenade" | "claymore",
+    at: Vec3, radius: number, fullDamageRadius: number, maxDamage: number,
+    ownerId: string, kind: KillCause,
   ): void {
     this.events.push({ type: "explosion", x: at.x, y: at.y, z: at.z, kind });
-
     for (const p of this.players.values()) {
       if (!p.alive) continue;
       const center = { x: p.pos.x, y: p.pos.y + PLAYER.height / 2, z: p.pos.z };
       const d = dist3(center, at);
       if (d > radius) continue;
-      const dmg = d <= fullDamageRadius
+      const damage = d <= fullDamageRadius
         ? maxDamage
         : Math.round(maxDamage * (1 - (d - fullDamageRadius) / (radius - fullDamageRadius)));
-      if (dmg > 0) this.damage(p, dmg, ownerId, kind);
+      if (damage > 0) this.damage(p, damage, ownerId, kind);
     }
+    for (const e of [...this.entities.values()]) {
+      if (dist3(e.pos, at) > CHAIN_RADIUS || !isExplosive(e.kind)) continue;
+      if (e.kind === "claymore") {
+        this.entities.delete(e.id);
+        this.explode(e.pos, 4.5, 3.2, 100, e.ownerId, "claymore");
+      } else {
+        e.expiresAt = Math.min(e.expiresAt, this.timeMs + 150);
+      }
+    }
+  }
 
-    // Sympathetic detonation: explosions cook off nearby explosives.
-    for (const g of this.grenades.values()) {
-      if (dist3(g.pos, at) <= CHAIN_RADIUS) {
-        g.explodeAt = Math.min(g.explodeAt, this.timeMs + 150);
-      }
+  private teleportOwner(e: SimEntity): void {
+    const owner = this.players.get(e.ownerId);
+    if (!owner?.alive) return;
+    const offsets = [
+      { x: 0, z: 0 }, { x: 0.8, z: 0 }, { x: -0.8, z: 0 },
+      { x: 0, z: 0.8 }, { x: 0, z: -0.8 },
+      { x: 0.8, z: 0.8 }, { x: -0.8, z: -0.8 },
+    ];
+    for (const off of offsets) {
+      const pos = { x: e.pos.x + off.x, y: Math.max(0, e.pos.y), z: e.pos.z + off.z };
+      if (!safePlayerPosition(pos, this.boxes)) continue;
+      owner.pos = pos;
+      owner.vy = 0;
+      this.events.push({ type: "weaponFx", kind: "teleportFx", x: pos.x, y: pos.y, z: pos.z });
+      return;
     }
-    for (const c of [...this.claymores.values()]) {
-      if (dist3(c.pos, at) <= CHAIN_RADIUS && this.claymores.delete(c.id)) {
-        this.explode(c.pos, CLAYMORE.blastRadius, CLAYMORE.fullDamageRadius, CLAYMORE.damage, c.ownerId, "claymore");
-      }
+  }
+
+  private nearestEnemy(ownerId: string, at: Vec3, range: number): SimPlayer | null {
+    let best: SimPlayer | null = null;
+    let bestDist = range;
+    for (const p of this.players.values()) {
+      if (!p.alive || p.id === ownerId) continue;
+      const d = dist3(p.pos, at);
+      if (d < bestDist) { best = p; bestDist = d; }
     }
+    return best;
+  }
+
+  private hasLineOfSight(at: Vec3, target: SimPlayer): boolean {
+    const origin = { x: at.x, y: at.y + 0.7, z: at.z };
+    const center = { x: target.pos.x, y: target.pos.y + 0.9, z: target.pos.z };
+    const delta = sub(center, origin);
+    const d = length(delta);
+    return rayWorld(origin, normalize(delta), this.boxes, d) >= d - 0.05;
   }
 
   private damage(victim: SimPlayer, amount: number, attackerId: string, cause: KillCause): void {
@@ -400,13 +711,11 @@ export class Match {
       this.events.push({ type: "hit", shooterId: attackerId, victimId: victim.id, damage: amount });
     }
     if (victim.hp > 0) return;
-
     victim.hp = 0;
     victim.alive = false;
     victim.deaths++;
     victim.respawnAt = this.timeMs + PLAYER.respawnMs;
     this.events.push({ type: "kill", killerId: attackerId, victimId: victim.id, cause });
-
     const killer = this.players.get(attackerId);
     if (killer && attackerId !== victim.id) {
       killer.kills++;
@@ -422,15 +731,13 @@ export class Match {
     const spawn = this.pickSpawn();
     p.pos = { x: spawn.x, y: 0, z: spawn.z };
     p.vy = 0;
+    p.pushX = 0;
+    p.pushZ = 0;
     p.yaw = spawn.yaw;
     p.pitch = 0;
     p.hp = PLAYER.hp;
     p.alive = true;
-    p.ammo = MG.magSize;
     p.reloading = false;
-    p.grenades = GRENADE.maxCarried;
-    p.claymores = CLAYMORE.maxCarried;
-    // Drop stale queued look angles so the spawn facing sticks until new input.
     p.cur = { ...IDLE_INPUT, yaw: spawn.yaw };
     this.events.push({ type: "spawn", id: p.id });
   }
@@ -438,17 +745,17 @@ export class Match {
   private stepRound(): void {
     if (!this.winnerId || this.timeMs < this.roundResetAt) return;
     this.winnerId = "";
-    this.grenades.clear();
-    this.claymores.clear();
+    this.entities.clear();
+    this.fillPickupPads();
     for (const p of this.players.values()) {
       p.kills = 0;
       p.deaths = 0;
+      this.equip(p, "mg");
       this.respawn(p);
     }
     this.events.push({ type: "roundReset" });
   }
 
-  /** Spawn at the point farthest from living opponents. */
   private pickSpawn() {
     let best = SPAWN_POINTS[Math.floor(this.rng() * SPAWN_POINTS.length)];
     let bestScore = -1;
@@ -456,14 +763,30 @@ export class Match {
     if (alive.length === 0) return best;
     for (const s of SPAWN_POINTS) {
       let nearest = Infinity;
-      for (const p of alive) {
-        nearest = Math.min(nearest, Math.hypot(p.pos.x - s.x, p.pos.z - s.z));
-      }
-      if (nearest > bestScore) {
-        bestScore = nearest;
-        best = s;
-      }
+      for (const p of alive) nearest = Math.min(nearest, Math.hypot(p.pos.x - s.x, p.pos.z - s.z));
+      if (nearest > bestScore) { bestScore = nearest; best = s; }
     }
     return best;
+  }
+}
+
+function isExplosive(kind: EntityKind): boolean {
+  return ["grenade", "claymore", "rocket", "cluster", "bomblet", "homingMine", "sticky", "plasma"].includes(kind);
+}
+
+function zero(): Vec3 { return { x: 0, y: 0, z: 0 } }
+function add(a: Vec3, b: Vec3): Vec3 { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z } }
+function sub(a: Vec3, b: Vec3): Vec3 { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z } }
+function scale(v: Vec3, n: number): Vec3 { return { x: v.x * n, y: v.y * n, z: v.z * n } }
+function dot(a: Vec3, b: Vec3): number { return a.x * b.x + a.y * b.y + a.z * b.z }
+function length(v: Vec3): number { return Math.hypot(v.x, v.y, v.z) }
+function normalize(v: Vec3): Vec3 {
+  const n = length(v);
+  return n > 1e-9 ? scale(v, 1 / n) : zero();
+}
+function shuffle<T>(items: T[], rng: () => number): void {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
   }
 }

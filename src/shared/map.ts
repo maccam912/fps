@@ -75,3 +75,15 @@ export const SPAWN_POINTS: SpawnPoint[] = [
   { x: -28, z: 0, yaw: Math.PI / 2 },
   { x: 28, z: 0, yaw: -Math.PI / 2 },
 ];
+
+export interface PickupPoint { x: number; y: number; z: number }
+
+// Open, reachable locations away from player spawns and narrow collision gaps.
+export const PICKUP_POINTS: PickupPoint[] = [
+  { x: -18, y: 0, z: -14 }, { x: 18, y: 0, z: 14 },
+  { x: -14, y: 0, z: 18 }, { x: 14, y: 0, z: -18 },
+  { x: -25, y: 0, z: -10 }, { x: 25, y: 0, z: 10 },
+  { x: -10, y: 0, z: 25 }, { x: 10, y: 0, z: -25 },
+  { x: -23, y: 0, z: 12 }, { x: 23, y: 0, z: -12 },
+  { x: -12, y: 0, z: -23 }, { x: 12, y: 0, z: 23 },
+];

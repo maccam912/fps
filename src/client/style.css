@@ -33,7 +33,9 @@ html, body {
 }
 
 .lobby-card {
-  width: min(440px, 92vw);
+  width: min(480px, 92vw);
+  max-height: 94vh;
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -64,13 +66,29 @@ html, body {
 
 .field { display: block; text-align: left; margin-bottom: 18px; }
 .field span { font-size: 11px; letter-spacing: 2px; color: var(--accent); }
-.field input {
+.field input, .field select {
   width: 100%; margin-top: 6px; padding: 12px 14px;
   font-size: 18px; color: #fff;
   background: rgba(0,0,0,.35);
   border: 1px solid var(--border); border-radius: 8px; outline: none;
 }
-.field input:focus { border-color: var(--accent); }
+.field select {
+  appearance: none;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+    linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 12px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+.field input:focus, .field select:focus { border-color: var(--accent); }
+.map-field small {
+  display: block; min-height: 34px; margin-top: 7px;
+  color: #8da4b0; font-size: 11px; line-height: 1.45;
+}
 
 .check-field {
   display: flex; align-items: flex-start; gap: 10px;

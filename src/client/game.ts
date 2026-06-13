@@ -12,7 +12,7 @@ import {
 } from "@babylonjs/core";
 import "@babylonjs/loaders/glTF";
 
-import { MAP_BOXES, ARENA_SIZE } from "@shared/map";
+import { getMap, type MapDefinition } from "@shared/map";
 import { PLAYER, SKIN_COUNT, MAX_FORCED_LAG_MS } from "@shared/constants";
 import { WEAPONS, type PlayerInput, type ShotMsg, type ExplosionMsg, type KillMsg, type WeaponFxMsg, type PickupWeaponKind, type WeaponKind } from "@shared/protocol";
 import type { EntityState, PickupState, PlayerState } from "@shared/schema";
@@ -55,6 +55,7 @@ export class Game {
   private shadows!: ShadowGenerator;
   private hud = new Hud();
   private audio = new AudioMan();
+  private map!: MapDefinition;
 
   private inputYaw = 0;
   private inputPitch = 0;
@@ -92,6 +93,7 @@ export class Game {
   }
 
   async start(): Promise<void> {
+    this.map = getMap(this.net.room.state.mapId);
     this.buildWorld();
     await this.loadAssets();
     this.bindState();
@@ -118,8 +120,9 @@ export class Game {
     s.clearColor = new Color4(0.018, 0.027, 0.05, 1);
     s.ambientColor = new Color3(0.08, 0.11, 0.17);
     s.fogMode = Scene.FOGMODE_LINEAR;
-    s.fogStart = 52;
-    s.fogEnd = 125;
+    const mapSpan = Math.max(this.map.width, this.map.depth);
+    s.fogStart = Math.max(52, mapSpan * 0.72);
+    s.fogEnd = Math.max(125, mapSpan * 1.45);
     s.fogColor = new Color3(0.035, 0.055, 0.09);
 
     const image = s.imageProcessingConfiguration;
@@ -164,11 +167,14 @@ export class Game {
     // Kenney prototype textures are an 8m grid design: tile once per 8 meters.
     const TEX_M = 8;
 
-    const ground = MeshBuilder.CreateGround("ground", { width: ARENA_SIZE + 2, height: ARENA_SIZE + 2 }, s);
+    const ground = MeshBuilder.CreateGround("ground", {
+      width: this.map.width + 2,
+      height: this.map.depth + 2,
+    }, s);
     const gmat = new PBRMaterial("gmat", s);
     const gtex = new Texture(`/textures/proto-dark.png`, s);
-    gtex.uScale = (ARENA_SIZE + 2) / TEX_M;
-    gtex.vScale = (ARENA_SIZE + 2) / TEX_M;
+    gtex.uScale = (this.map.width + 2) / TEX_M;
+    gtex.vScale = (this.map.depth + 2) / TEX_M;
     gmat.albedoTexture = gtex;
     gmat.albedoColor = new Color3(0.42, 0.48, 0.58);
     gmat.metallic = 0.12;
@@ -195,7 +201,7 @@ export class Game {
       mats[v] = m;
     }
 
-    MAP_BOXES.forEach((b, i) => {
+    this.map.boxes.forEach((b, i) => {
       const u = (d: number) => Math.max(0.5, d / TEX_M);
       const faceUV = [
         new Vector4(0, 0, u(b.sx), u(b.sy)), new Vector4(0, 0, u(b.sx), u(b.sy)), // front/back
@@ -228,7 +234,7 @@ export class Game {
     tex.update();
 
     const sky = MeshBuilder.CreateSphere("sky", {
-      diameter: 240,
+      diameter: Math.max(240, Math.max(this.map.width, this.map.depth) * 2.5),
       segments: 24,
       sideOrientation: Mesh.BACKSIDE,
     }, this.scene);
@@ -251,11 +257,13 @@ export class Game {
     const amberMat = this.makeEmissiveMaterial("lane-amber", amber, 2.8);
 
     // Thin floor guides emphasize the central objective and cardinal lanes.
+    const laneX = Math.min(18, this.map.width * 0.28);
+    const laneZ = Math.min(18, this.map.depth * 0.28);
     const strips: Array<[number, number, number, number, PBRMaterial]> = [
       [-5.5, -5.5, 11, 0.08, cyanMat], [-5.5, 5.5, 11, 0.08, cyanMat],
       [-5.5, 0, 0.08, 11, cyanMat], [5.5, 0, 0.08, 11, cyanMat],
-      [0, -18, 0.1, 13, amberMat], [0, 18, 0.1, 13, amberMat],
-      [-18, 0, 13, 0.1, amberMat], [18, 0, 13, 0.1, amberMat],
+      [0, -laneZ, 0.1, 13, amberMat], [0, laneZ, 0.1, 13, amberMat],
+      [-laneX, 0, 13, 0.1, amberMat], [laneX, 0, 13, 0.1, amberMat],
     ];
     strips.forEach(([x, z, width, depth, material], i) => {
       const strip = MeshBuilder.CreateBox(`floor-guide-${i}`, { width, height: 0.035, depth }, this.scene);
@@ -265,8 +273,11 @@ export class Game {
       strip.freezeWorldMatrix();
     });
 
+    const fixtureX = this.map.width / 2 - 5;
+    const fixtureZ = this.map.depth / 2 - 5;
     const fixtures: Array<[number, number, Color3]> = [
-      [-27, -27, cyan], [27, 27, cyan], [-27, 27, amber], [27, -27, amber],
+      [-fixtureX, -fixtureZ, cyan], [fixtureX, fixtureZ, cyan],
+      [-fixtureX, fixtureZ, amber], [fixtureX, -fixtureZ, amber],
     ];
     fixtures.forEach(([x, z, color], i) => {
       const pole = MeshBuilder.CreateCylinder(`light-pole-${i}`, {
@@ -310,8 +321,8 @@ export class Game {
     const dust = new ParticleSystem("ambient-dust", 220, this.scene);
     dust.particleTexture = tex;
     dust.emitter = new Vector3(0, 3.5, 0);
-    dust.minEmitBox = new Vector3(-32, -2.8, -32);
-    dust.maxEmitBox = new Vector3(32, 3.5, 32);
+    dust.minEmitBox = new Vector3(-this.map.width / 2, -2.8, -this.map.depth / 2);
+    dust.maxEmitBox = new Vector3(this.map.width / 2, 3.5, this.map.depth / 2);
     dust.color1 = new Color4(0.4, 0.65, 0.9, 0.14);
     dust.color2 = new Color4(0.75, 0.82, 1, 0.08);
     dust.colorDead = new Color4(0.3, 0.45, 0.7, 0);
@@ -367,10 +378,16 @@ export class Game {
 
     $(room.state).players.onAdd((p, id) => {
       if (id !== this.net.sessionId) this.spawnPlayerVisual(p, id);
-      else this.players.set(id, {
-        root: new TransformNode(`self`, this.scene), state: p,
-        nameTag: null as unknown as Mesh, bobPhase: 0, held: null, weapon: "mg",
-      });
+      else {
+        // Begin facing the direction chosen by the map spawn. Otherwise the
+        // first idle input forces yaw 0 and edge spawns stare at the outer wall.
+        this.inputYaw = this.viewYaw = p.yaw;
+        this.inputPitch = this.viewPitch = p.pitch;
+        this.players.set(id, {
+          root: new TransformNode(`self`, this.scene), state: p,
+          nameTag: null as unknown as Mesh, bobPhase: 0, held: null, weapon: "mg",
+        });
+      }
     });
     $(room.state).players.onRemove((_p, id) => {
       const v = this.players.get(id);

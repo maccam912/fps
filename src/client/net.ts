@@ -38,6 +38,7 @@ export class Net {
     events: NetEvents,
     roundDurationMinutes?: number,
     delayedMouseLook?: boolean,
+    mapId?: string,
   ): Promise<void> {
     const client = new Client(endpoint());
     this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {
@@ -45,8 +46,10 @@ export class Net {
       name,
       roundDurationMinutes,
       delayedMouseLook,
+      mapId,
     });
     this.$ = getStateCallbacks(this.room);
+    await waitFor(() => Boolean(this.room.state.mapId), 5000);
 
     this.room.onMessage(MSG.pong, (m: { t: number }) => {
       const sample = performance.now() - m.t;
@@ -81,4 +84,22 @@ export class Net {
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.room?.leave();
   }
+}
+
+function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = performance.now();
+    const check = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+      if (performance.now() - startedAt >= timeoutMs) {
+        reject(new Error("timed out waiting for initial room state"));
+        return;
+      }
+      setTimeout(check, 10);
+    };
+    check();
+  });
 }

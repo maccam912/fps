@@ -6,12 +6,15 @@ import {
   DEFAULT_ROUND_DURATION_MS, MIN_ROUND_DURATION_MS, MAX_ROUND_DURATION_MS,
 } from "@shared/constants";
 import { Match } from "../sim/Match";
+import { selectMapId } from "@shared/map";
+import { mulberry32 } from "@shared/rng";
 
 interface JoinOptions {
   code?: string;
   name?: string;
   roundDurationMinutes?: number;
   delayedMouseLook?: boolean;
+  mapId?: string;
 }
 
 export class FpsRoom extends Room<GameState> {
@@ -21,10 +24,13 @@ export class FpsRoom extends Room<GameState> {
 
   onCreate(options: JoinOptions) {
     const roundDurationMs = sanitizeRoundDuration(options.roundDurationMinutes);
-    this.match = new Match(Date.now() & 0xffffffff, roundDurationMs);
+    const seed = Date.now() & 0xffffffff;
+    const mapId = selectMapId(options.mapId, mulberry32(seed));
+    this.match = new Match(seed, roundDurationMs, mapId);
     this.setState(new GameState());
     this.state.code = String(options.code ?? "").toUpperCase().slice(0, 8);
     this.state.delayedMouseLook = options.delayedMouseLook === true;
+    this.state.mapId = mapId;
     this.state.roundDurationMs = roundDurationMs;
     this.state.roundTimeLeftMs = roundDurationMs;
     this.setPatchRate(PATCH_MS);

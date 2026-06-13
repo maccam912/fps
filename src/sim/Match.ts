@@ -6,7 +6,7 @@ import {
   MIN_ROUND_DURATION_MS, MAX_ROUND_DURATION_MS,
   PICKUP_ACTIVE_COUNT, PICKUP_RADIUS, PICKUP_RESPAWN_MS,
 } from "@shared/constants";
-import { PICKUP_POINTS, SPAWN_POINTS } from "@shared/map";
+import { getMap, type MapDefinition } from "@shared/map";
 import {
   PICKUP_WEAPONS, WEAPONS,
   type KillCause, type PickupWeaponKind, type PlayerInput, type WeaponKind,
@@ -104,14 +104,17 @@ export class Match {
   roundDurationMs: number;
   roundEndsAt: number;
   roundNumber = 1;
+  readonly map: MapDefinition;
   private events: SimEvent[] = [];
-  private boxes: Box[] = worldBoxes();
+  private boxes: Box[];
   private rng: () => number;
   private nextId = 1;
   private pickupRespawns = new Map<number, number>();
 
-  constructor(seed = 1234, roundDurationMs = DEFAULT_ROUND_DURATION_MS) {
+  constructor(seed = 1234, roundDurationMs = DEFAULT_ROUND_DURATION_MS, mapId?: string) {
     this.rng = mulberry32(seed);
+    this.map = getMap(mapId);
+    this.boxes = worldBoxes(this.map.boxes);
     this.roundDurationMs = clampRoundDuration(roundDurationMs);
     this.roundEndsAt = this.roundDurationMs;
     this.fillPickupPads();
@@ -383,7 +386,7 @@ export class Match {
     }
     for (const [pad, at] of [...this.pickupRespawns]) {
       if (this.timeMs < at || this.pickups.size >= PICKUP_ACTIVE_COUNT) continue;
-      const point = PICKUP_POINTS[pad];
+      const point = this.map.pickups[pad];
       const occupied = [...this.players.values()].some((p) => p.alive && dist3(p.pos, point) < 2);
       if (occupied) {
         this.pickupRespawns.set(pad, this.timeMs + 1000);
@@ -397,7 +400,7 @@ export class Match {
   private fillPickupPads(): void {
     this.pickups.clear();
     this.pickupRespawns.clear();
-    const pads = PICKUP_POINTS.map((_p, i) => i);
+    const pads = this.map.pickups.map((_p, i) => i);
     shuffle(pads, this.rng);
     for (const pad of pads.slice(0, PICKUP_ACTIVE_COUNT)) this.spawnPickup(pad);
   }
@@ -407,7 +410,7 @@ export class Match {
     const available = PICKUP_WEAPONS.filter((kind) => !active.has(kind));
     const pool = available.length > 0 ? available : PICKUP_WEAPONS;
     const kind = pool[Math.floor(this.rng() * pool.length)];
-    const point = PICKUP_POINTS[pad];
+    const point = this.map.pickups[pad];
     this.pickups.set(`p${pad}`, { id: `p${pad}`, pad, kind, pos: { ...point } });
   }
 
@@ -796,11 +799,11 @@ export class Match {
   }
 
   private pickSpawn() {
-    let best = SPAWN_POINTS[Math.floor(this.rng() * SPAWN_POINTS.length)];
+    let best = this.map.spawns[Math.floor(this.rng() * this.map.spawns.length)];
     let bestScore = -1;
     const alive = [...this.players.values()].filter((p) => p.alive);
     if (alive.length === 0) return best;
-    for (const s of SPAWN_POINTS) {
+    for (const s of this.map.spawns) {
       let nearest = Infinity;
       for (const p of alive) nearest = Math.min(nearest, Math.hypot(p.pos.x - s.x, p.pos.z - s.z));
       if (nearest > bestScore) { bestScore = nearest; best = s; }

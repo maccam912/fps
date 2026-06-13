@@ -1,5 +1,6 @@
 import { Net } from "./net";
 import { Game } from "./game";
+import { MAPS } from "@shared/map";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -7,6 +8,8 @@ const nameInput = $<HTMLInputElement>("name-input");
 const codeInput = $<HTMLInputElement>("code-input");
 const durationInput = $<HTMLInputElement>("round-duration");
 const delayedMouseLookInput = $<HTMLInputElement>("delayed-mouselook");
+const mapSelect = $<HTMLSelectElement>("map-select");
+const mapDetail = $("map-detail");
 const errBox = $("lobby-error");
 
 const ADJ = ["Laggy", "Rubber", "Packet", "Jitter", "Buffer", "Choppy", "Dialup", "Pingy"];
@@ -23,10 +26,29 @@ nameInput.value = localStorage.getItem("lagwar-name") ?? randomName();
 const urlCode = new URLSearchParams(location.search).get("code");
 if (urlCode) codeInput.value = urlCode.toUpperCase();
 
+mapSelect.innerHTML = [
+  `<option value="random">RANDOM MAP</option>`,
+  ...MAPS.map((map) => (
+    `<option value="${map.id}">${map.name.toUpperCase()} · ${map.sizeLabel} · ${map.width}×${map.depth}</option>`
+  )),
+].join("");
+
+function updateMapDetail(): void {
+  if (mapSelect.value === "random") {
+    mapDetail.textContent = `Any of ${MAPS.length} arenas, from compact to huge. Chosen when the party is created.`;
+    return;
+  }
+  const map = MAPS.find((candidate) => candidate.id === mapSelect.value);
+  mapDetail.textContent = map?.description ?? "";
+}
+mapSelect.addEventListener("change", updateMapDetail);
+updateMapDetail();
+
 async function join(
   code: string,
   roundDurationMinutes?: number,
   delayedMouseLook?: boolean,
+  mapId?: string,
 ): Promise<void> {
   const name = nameInput.value.trim() || randomName();
   localStorage.setItem("lagwar-name", name);
@@ -42,7 +64,7 @@ async function join(
       onWeaponFx: (m) => game.onWeaponFx(m),
       onPickup: (m) => game.onPickup(m),
       onHitConfirm: () => game.onHitConfirm(),
-    }, roundDurationMinutes, delayedMouseLook);
+    }, roundDurationMinutes, delayedMouseLook, mapId);
 
     // Exposed for the headless smoke test.
     (window as any).__lagwar = { net, game };
@@ -62,7 +84,12 @@ async function join(
 
 $("create-btn").addEventListener("click", () => {
   const minutes = Math.max(1, Math.min(60, Number(durationInput.value) || 5));
-  join(codeInput.value.trim() || randomCode(), minutes, delayedMouseLookInput.checked);
+  join(
+    codeInput.value.trim() || randomCode(),
+    minutes,
+    delayedMouseLookInput.checked,
+    mapSelect.value,
+  );
 });
 $("join-btn").addEventListener("click", () => {
   const code = codeInput.value.trim();

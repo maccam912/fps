@@ -88,6 +88,38 @@ describe("FpsRoom", () => {
     await host.leave();
   });
 
+  it("uses the creator's selected map for every player in the room", async () => {
+    const host = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "MAPS", name: "Host", mapId: "megacomplex",
+    });
+    const peer = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "MAPS", name: "Peer", mapId: "pit",
+    });
+    await until(() => peer.state.players?.size === 2);
+
+    expect(host.state.mapId).toBe("megacomplex");
+    expect(peer.state.mapId).toBe("megacomplex");
+
+    await peer.leave();
+    await host.leave();
+  });
+
+  it("resolves random and invalid map selections to a valid map", async () => {
+    const random = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "RNDA", name: "Random", mapId: "random",
+    });
+    const invalid = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "RNDB", name: "Invalid", mapId: "does-not-exist",
+    });
+    await until(() => Boolean(random.state.mapId) && Boolean(invalid.state.mapId));
+
+    expect(["crossfire", "pit", "switchyard", "citadel", "maze", "megacomplex"]).toContain(random.state.mapId);
+    expect(["crossfire", "pit", "switchyard", "citadel", "maze", "megacomplex"]).toContain(invalid.state.mapId);
+
+    await random.leave();
+    await invalid.leave();
+  });
+
   it("host can set forced lag; non-host cannot; values clamp at 10s", async () => {
     const host = await server.sdk.joinOrCreate(ROOM_NAME, { code: "LAGG", name: "Host" });
     const peer = await server.sdk.joinOrCreate(ROOM_NAME, { code: "LAGG", name: "Peer" });

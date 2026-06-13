@@ -5,6 +5,8 @@ import {
   PLAYER, TICK_MS,
 } from "@shared/constants";
 import { PICKUP_WEAPONS, WEAPONS, type PlayerInput, type WeaponKind } from "@shared/protocol";
+import { MAPS, selectMapId } from "@shared/map";
+import { safePlayerPosition, worldBoxes } from "../src/sim/physics";
 
 function input(partial: Partial<PlayerInput> = {}): PlayerInput {
   return {
@@ -40,6 +42,38 @@ function tapFire(m: Match, p: SimPlayer, partial: Partial<PlayerInput> = {}): vo
   m.enqueueInput(p.id, input({ fire: false, ...partial }));
   m.tick(TICK_MS);
 }
+
+describe("map catalog", () => {
+  it("offers varied footprints including multiple larger arenas", () => {
+    expect(MAPS).toHaveLength(6);
+    expect(new Set(MAPS.map((map) => `${map.width}x${map.depth}`)).size).toBeGreaterThanOrEqual(5);
+    expect(MAPS.filter((map) => map.width * map.depth > 64 * 64)).toHaveLength(4);
+    expect(MAPS.some((map) => map.sizeLabel === "HUGE")).toBe(true);
+  });
+
+  it.each(MAPS)("$name has safe in-bounds spawns and enough reachable pickup pads", (map) => {
+    const boxes = worldBoxes(map.boxes);
+    expect(map.spawns.length).toBeGreaterThanOrEqual(8);
+    expect(map.pickups.length).toBeGreaterThanOrEqual(PICKUP_ACTIVE_COUNT);
+
+    for (const spawn of map.spawns) {
+      expect(Math.abs(spawn.x)).toBeLessThan(map.width / 2);
+      expect(Math.abs(spawn.z)).toBeLessThan(map.depth / 2);
+      expect(safePlayerPosition({ x: spawn.x, y: 0, z: spawn.z }, boxes)).toBe(true);
+    }
+    for (const pickup of map.pickups) {
+      expect(Math.abs(pickup.x)).toBeLessThan(map.width / 2);
+      expect(Math.abs(pickup.z)).toBeLessThan(map.depth / 2);
+      expect(safePlayerPosition(pickup, boxes)).toBe(true);
+    }
+  });
+
+  it("accepts explicit maps and resolves random or invalid selections from the catalog", () => {
+    expect(selectMapId("citadel", () => 0)).toBe("citadel");
+    expect(selectMapId("random", () => 0)).toBe(MAPS[0].id);
+    expect(selectMapId("not-a-map", () => 0.999999)).toBe(MAPS[MAPS.length - 1].id);
+  });
+});
 
 describe("movement and forced lag", () => {
   it("moves, collides, and delays input without changing its duration", () => {

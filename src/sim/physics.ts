@@ -1,7 +1,7 @@
 // Minimal deterministic AABB physics: enough for a blocky arena shooter,
 // no physics engine needed. All units are meters; +Y is up.
 
-import { MAP_BOXES } from "@shared/map";
+import type { MapBox } from "@shared/map";
 import { PLAYER } from "@shared/constants";
 
 export interface Box {
@@ -11,8 +11,8 @@ export interface Box {
 
 export interface Vec3 { x: number; y: number; z: number }
 
-export function worldBoxes(): Box[] {
-  return MAP_BOXES.map((b) => ({
+export function worldBoxes(mapBoxes: readonly MapBox[]): Box[] {
+  return mapBoxes.map((b) => ({
     minX: b.x - b.sx / 2, maxX: b.x + b.sx / 2,
     minY: b.y - b.sy / 2, maxY: b.y + b.sy / 2,
     minZ: b.z - b.sz / 2, maxZ: b.z + b.sz / 2,

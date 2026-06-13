@@ -1,6 +1,5 @@
 import { Net } from "./net";
 import { Game } from "./game";
-import { AudioMan } from "./audio";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -72,6 +71,3 @@ $("join-btn").addEventListener("click", () => {
 codeInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") $("join-btn").click();
 });
-
-// lobby ambience
-new AudioMan().playMusic("music-lobby.ogg", 0.2);

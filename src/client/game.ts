@@ -90,7 +90,8 @@ export class Game {
     this.hud.show();
     this.hud.onSetLag = (ms) => this.net.setLag(ms);
     this.hud.onStartRound = () => this.net.startRound();
-    this.audio.playMusic("music-game.ogg", 0.16);
+    this.hud.onSetVolume = (volume) => this.audio.setVolume(volume);
+    this.hud.setSoundVolume(this.audio.getVolume());
     this.audio.play("join", 0.7);
 
     setInterval(() => this.sendInput(), INPUT_SEND_MS);
@@ -478,6 +479,22 @@ export class Game {
     window.addEventListener("keydown", (e) => {
       if (e.repeat) return;
       const k = e.code;
+      if (k === "Escape") {
+        const visible = !this.hud.isEscapeMenuVisible();
+        this.hud.setEscapeMenuVisible(visible);
+        this.firing = false;
+        this.keys.clear();
+        this.latched = { jump: false, reload: false };
+        if (visible) {
+          if (lockRetry) { clearTimeout(lockRetry); lockRetry = null; }
+          this.hud.setHostPanelVisible(false);
+          document.exitPointerLock?.();
+        } else {
+          requestLock(false);
+        }
+        e.preventDefault();
+        return;
+      }
       this.keys.add(k);
       if (k === "Space") { this.latched.jump = true; e.preventDefault(); }
       if (k === "KeyR") this.latched.reload = true;

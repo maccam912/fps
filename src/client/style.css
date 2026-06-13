@@ -243,6 +243,34 @@ html, body {
 #next-round-btn { width: 100%; }
 #next-round-wait { color: #8da4b0; font-size: 12px; letter-spacing: 1px; }
 
+#escape-menu {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(3, 7, 12, .58);
+  pointer-events: auto;
+}
+.escape-card {
+  width: min(380px, 88vw);
+  padding: 24px 26px 28px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 0 50px rgba(108, 243, 255, .12);
+}
+.escape-title {
+  margin-bottom: 24px; color: #fff;
+  font-size: 22px; font-weight: 900; letter-spacing: 4px;
+}
+.volume-control {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; color: var(--accent);
+  font-size: 11px; font-weight: 700; letter-spacing: 2px;
+}
+#sound-volume-value { color: #fff; font-size: 13px; letter-spacing: 0; }
+#sound-volume {
+  width: 100%; height: 24px; cursor: pointer;
+  accent-color: var(--accent);
+}
+
 #host-panel {
   position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
   width: min(560px, 92vw);

@@ -33,6 +33,7 @@ function el<T extends HTMLElement = HTMLElement>(id: string): T {
 export class Hud {
   onSetLag: ((ms: number) => void) | null = null;
   onStartRound: (() => void) | null = null;
+  onSetVolume: ((volume: number) => void) | null = null;
   private lastHp = 100;
   private bannerTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -52,6 +53,13 @@ export class Hud {
       b.addEventListener("click", () => apply(Number(b.dataset.lag)));
     });
     el<HTMLButtonElement>("next-round-btn").addEventListener("click", () => this.onStartRound?.());
+
+    const volume = el<HTMLInputElement>("sound-volume");
+    volume.addEventListener("input", () => {
+      const value = Number(volume.value);
+      el("sound-volume-value").textContent = `${value}%`;
+      this.onSetVolume?.(value / 100);
+    });
   }
 
   show(): void {
@@ -177,6 +185,21 @@ export class Hud {
 
   setPausedHint(visible: boolean): void {
     el("paused-hint").classList.toggle("hidden", !visible);
+  }
+
+  setEscapeMenuVisible(visible: boolean): void {
+    el("escape-menu").classList.toggle("hidden", !visible);
+    el("paused-hint").classList.toggle("hidden", visible);
+  }
+
+  isEscapeMenuVisible(): boolean {
+    return !el("escape-menu").classList.contains("hidden");
+  }
+
+  setSoundVolume(volume: number): void {
+    const percent = Math.round(volume * 100);
+    el<HTMLInputElement>("sound-volume").value = String(percent);
+    el("sound-volume-value").textContent = `${percent}%`;
   }
 
   toast(): void {

@@ -48,7 +48,9 @@ is in the link). Friends on your network/host can join the same code.
 | L | **host only, host-controlled mode**: lag console |
 
 The host chooses the map (or a random map) and round length when creating the
-party. Six arenas range from the compact Pit to the huge Megacomplex. Kills and
+party, plus up to two simple server-controlled practice bots. Bots chase human
+players, shoot, respawn, and count on the scoreboard, but do not receive forced
+lag. Six arenas range from the compact Pit to the huge Megacomplex. Kills and
 deaths are tracked throughout the round. When time expires, play freezes on the
 final leaderboard until the host starts the next round.
 

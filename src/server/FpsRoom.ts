@@ -2,7 +2,7 @@ import { Room, Client } from "@colyseus/core";
 import { EntityState, GameState, PickupState, PlayerState } from "@shared/schema";
 import { MSG, PlayerInput, KillMsg } from "@shared/protocol";
 import {
-  TICK_MS, PATCH_MS, MAX_FORCED_LAG_MS, SKIN_COUNT,
+  TICK_MS, PATCH_MS, MAX_FORCED_LAG_MS, MAX_BOTS, SKIN_COUNT,
   DEFAULT_ROUND_DURATION_MS, MIN_ROUND_DURATION_MS, MAX_ROUND_DURATION_MS,
 } from "@shared/constants";
 import { Match } from "../sim/Match";
@@ -18,12 +18,14 @@ interface JoinOptions {
   lagMode?: string;
   lagPerKillMs?: number;
   lagCapMs?: number;
+  botCount?: number;
 }
 
 export class FpsRoom extends Room<GameState> {
   maxClients = 16;
   private match!: Match;
   private skinCounter = 0;
+  private bots = new Map<string, BotBrain>();
 
   onCreate(options: JoinOptions) {
     const roundDurationMs = sanitizeRoundDuration(options.roundDurationMinutes);
@@ -44,6 +46,7 @@ export class FpsRoom extends Room<GameState> {
     }
     this.state.roundDurationMs = roundDurationMs;
     this.state.roundTimeLeftMs = roundDurationMs;
+    this.addBots(sanitizeBotCount(options.botCount));
     this.setPatchRate(PATCH_MS);
 
     this.onMessage(MSG.input, (client, input: PlayerInput) => {
@@ -103,14 +106,15 @@ export class FpsRoom extends Room<GameState> {
     this.state.players.delete(client.sessionId);
     // Pass the crown
     if (client.sessionId === this.state.hostId) {
-      const next = this.state.players.keys().next();
-      this.state.hostId = next.done ? "" : next.value;
-      const p = next.done ? undefined : this.state.players.get(next.value);
+      const nextId = [...this.state.players.entries()].find(([, p]) => !p.bot)?.[0] ?? "";
+      this.state.hostId = nextId;
+      const p = nextId ? this.state.players.get(nextId) : undefined;
       if (p) p.host = true;
     }
   }
 
   private update(dt: number) {
+    this.updateBots();
     this.match.tick(dt);
     this.syncToState();
 
@@ -152,6 +156,63 @@ export class FpsRoom extends Room<GameState> {
           break;
         }
       }
+    }
+  }
+
+  private addBots(count: number): void {
+    for (let i = 0; i < count; i++) {
+      const id = `bot-${i + 1}`;
+      const name = `Practice Bot ${i + 1}`;
+      const skin = this.skinCounter++ % SKIN_COUNT;
+      this.match.addPlayer(id, name, skin, true);
+
+      const ps = new PlayerState();
+      ps.id = id;
+      ps.name = name;
+      ps.skin = skin;
+      ps.bot = true;
+      this.state.players.set(id, ps);
+      this.bots.set(id, {
+        seq: 0,
+        nextThinkAt: 0,
+        strafe: i % 2 === 0 ? 0.45 : -0.45,
+      });
+    }
+    this.syncToState();
+  }
+
+  private updateBots(): void {
+    for (const [id, brain] of this.bots) {
+      if (this.match.timeMs < brain.nextThinkAt) continue;
+      brain.nextThinkAt = this.match.timeMs + 150;
+      brain.seq++;
+
+      const bot = this.match.players.get(id);
+      if (!bot?.alive) continue;
+      const target = nearestLivingPlayer(this.match, id);
+      if (!target) {
+        this.match.applyInputImmediately(id, {
+          seq: brain.seq, moveX: 0, moveZ: 0,
+          yaw: bot.yaw, pitch: 0,
+          jump: false, fire: false, reload: false,
+        });
+        continue;
+      }
+
+      const dx = target.pos.x - bot.pos.x;
+      const dz = target.pos.z - bot.pos.z;
+      const dy = target.pos.y + 0.9 - (bot.pos.y + 1.55);
+      const flatDistance = Math.hypot(dx, dz);
+      this.match.applyInputImmediately(id, {
+        seq: brain.seq,
+        moveX: flatDistance < 10 ? brain.strafe : 0,
+        moveZ: flatDistance > 4 ? 1 : 0,
+        yaw: Math.atan2(dx, dz),
+        pitch: Math.atan2(dy, Math.max(0.001, flatDistance)),
+        jump: brain.seq % 17 === 0,
+        fire: brain.seq % 8 !== 0,
+        reload: bot.weapon === "mg" && bot.ammo < 8,
+      });
     }
   }
 
@@ -266,6 +327,37 @@ function sanitizeNonNegativeMs(value: unknown, fallback: number): number {
   const ms = Number(value);
   if (!Number.isFinite(ms)) return fallback;
   return Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(ms)));
+}
+
+interface BotBrain {
+  seq: number;
+  nextThinkAt: number;
+  strafe: number;
+}
+
+function sanitizeBotCount(value: unknown): number {
+  const count = Number(value);
+  if (!Number.isFinite(count)) return 0;
+  return Math.max(0, Math.min(MAX_BOTS, Math.floor(count)));
+}
+
+function nearestLivingPlayer(match: Match, botId: string) {
+  const bot = match.players.get(botId);
+  if (!bot) return undefined;
+  for (const includeBots of [false, true]) {
+    let nearest;
+    let nearestDistance = Infinity;
+    for (const player of match.players.values()) {
+      if (player.id === botId || !player.alive || (!includeBots && player.bot)) continue;
+      const distance = Math.hypot(player.pos.x - bot.pos.x, player.pos.z - bot.pos.z);
+      if (distance < nearestDistance) {
+        nearest = player;
+        nearestDistance = distance;
+      }
+    }
+    if (nearest) return nearest;
+  }
+  return undefined;
 }
 
 function clamp(v: number, lo: number, hi: number) {

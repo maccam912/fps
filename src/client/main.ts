@@ -12,6 +12,7 @@ const mapSelect = $<HTMLSelectElement>("map-select");
 const lagModeSelect = $<HTMLSelectElement>("lag-mode");
 const lagPerKillInput = $<HTMLInputElement>("lag-per-kill");
 const lagCapInput = $<HTMLInputElement>("lag-cap");
+const botCountSelect = $<HTMLSelectElement>("bot-count");
 const killLagOptions = $("kill-lag-options");
 const mapDetail = $("map-detail");
 const errBox = $("lobby-error");
@@ -62,6 +63,7 @@ async function join(
   lagMode?: string,
   lagPerKillMs?: number,
   lagCapMs?: number,
+  botCount?: number,
 ): Promise<void> {
   const name = nameInput.value.trim() || randomName();
   localStorage.setItem("lagwar-name", name);
@@ -77,7 +79,7 @@ async function join(
       onWeaponFx: (m) => game.onWeaponFx(m),
       onPickup: (m) => game.onPickup(m),
       onHitConfirm: () => game.onHitConfirm(),
-    }, roundDurationMinutes, delayedMouseLook, mapId, lagMode, lagPerKillMs, lagCapMs);
+    }, roundDurationMinutes, delayedMouseLook, mapId, lagMode, lagPerKillMs, lagCapMs, botCount);
 
     // Exposed for the headless smoke test.
     (window as any).__lagwar = { net, game };
@@ -109,6 +111,7 @@ $("create-btn").addEventListener("click", () => {
     lagModeSelect.value,
     killLag ? perKillMs : undefined,
     killLag ? capMs : undefined,
+    Number(botCountSelect.value),
   );
 });
 $("join-btn").addEventListener("click", () => {

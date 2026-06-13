@@ -42,6 +42,7 @@ export class Net {
     lagMode?: string,
     lagPerKillMs?: number,
     lagCapMs?: number,
+    botCount?: number,
   ): Promise<void> {
     const client = new Client(endpoint());
     this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {
@@ -53,6 +54,7 @@ export class Net {
       lagMode,
       lagPerKillMs,
       lagCapMs,
+      botCount,
     });
     this.$ = getStateCallbacks(this.room);
     await waitFor(() => Boolean(this.room.state.mapId), 5000);

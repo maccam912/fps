@@ -53,6 +53,7 @@ export interface SimPlayer {
   cur: PlayerInput;
   queue: QueuedInput[];
   naturalRttMs: number;
+  bot: boolean;
 }
 
 export interface SimPickup {
@@ -124,7 +125,7 @@ export class Match {
     this.fillPickupPads();
   }
 
-  addPlayer(id: string, name: string, skin: number): SimPlayer {
+  addPlayer(id: string, name: string, skin: number, bot = false): SimPlayer {
     const spawn = this.pickSpawn();
     const p: SimPlayer = {
       id, name, skin,
@@ -138,6 +139,7 @@ export class Match {
       cur: { ...IDLE_INPUT, yaw: spawn.yaw },
       queue: [],
       naturalRttMs: 0,
+      bot,
     };
     this.players.set(id, p);
     return p;
@@ -161,6 +163,7 @@ export class Match {
   }
 
   getPlayerLagMs(id: string): number {
+    if (this.players.get(id)?.bot) return 0;
     if (this.lagMode === "host") return this.forcedLagMs;
     const lag = Math.min(
       Number.MAX_SAFE_INTEGER,
@@ -189,6 +192,13 @@ export class Match {
     let i = p.queue.length;
     while (i > 0 && p.queue[i - 1].applyAt > applyAt) i--;
     p.queue.splice(i, 0, { applyAt, input });
+  }
+
+  applyInputImmediately(id: string, input: PlayerInput): void {
+    if (this.roundPhase !== "playing") return;
+    const p = this.players.get(id);
+    if (!p) return;
+    this.applyInput(p, input);
   }
 
   drainEvents(): SimEvent[] {
@@ -236,11 +246,15 @@ export class Match {
   private applyDueInputs(p: SimPlayer): void {
     while (p.queue.length > 0 && p.queue[0].applyAt <= this.timeMs) {
       const { input } = p.queue.shift()!;
-      const prev = p.cur;
-      p.cur = input;
-      if (input.fire && !prev.fire) p.triggerPressed = true;
-      if (input.reload && !prev.reload && p.alive && !this.winnerId) this.startReload(p);
+      this.applyInput(p, input);
     }
+  }
+
+  private applyInput(p: SimPlayer, input: PlayerInput): void {
+    const prev = p.cur;
+    p.cur = input;
+    if (input.fire && !prev.fire) p.triggerPressed = true;
+    if (input.reload && !prev.reload && p.alive && !this.winnerId) this.startReload(p);
   }
 
   private stepPlayer(p: SimPlayer, dt: number): void {

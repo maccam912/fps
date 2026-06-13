@@ -5,6 +5,7 @@ export const TICK_MS = 1000 / TICK_RATE;
 export const PATCH_MS = 50; // colyseus state patch interval
 
 export const MAX_FORCED_LAG_MS = 10_000;
+export const MAX_BOTS = 2;
 
 export const PLAYER = {
   hp: 100,

@@ -104,6 +104,28 @@ describe("FpsRoom", () => {
     await host.leave();
   });
 
+  it("adds up to two lag-free practice bots when the party is created", async () => {
+    const host = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "BOTS", name: "Host", botCount: 99,
+    });
+    const room = server.getRoomById(host.roomId) as any;
+    await until(() => host.state.players?.size === 3);
+
+    const bots = [...host.state.players.values()].filter((player) => player.bot);
+    expect(bots).toHaveLength(2);
+    expect(host.state.hostId).toBe(host.sessionId);
+    expect(bots.map((bot) => bot.name)).toEqual(["Practice Bot 1", "Practice Bot 2"]);
+
+    await sendAndProcess(room, host, MSG.setLag, { ms: 1000 });
+    await until(() => host.state.players.get(host.sessionId)?.forcedLagMs === 1000);
+    expect(bots.every((bot) => bot.forcedLagMs === 0 && bot.artificialLagMs === 0)).toBe(true);
+
+    const start = bots.map((bot) => [bot.x, bot.z]);
+    await until(() => bots.some((bot, i) => bot.x !== start[i][0] || bot.z !== start[i][1]));
+
+    await host.leave();
+  });
+
   it("uses the creator's per-kill lag multiplier and optional cap", async () => {
     const host = await server.sdk.joinOrCreate(ROOM_NAME, {
       code: "KILL", name: "Host", lagMode: "kills", lagPerKillMs: 75, lagCapMs: 500,

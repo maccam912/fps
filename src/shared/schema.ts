@@ -6,6 +6,7 @@ export class PlayerState extends Schema {
   @type("string") name = "";
   @type("uint8") skin = 0;
   @type("boolean") host = false;
+  @type("boolean") bot = false;
 
   @type("number") x = 0;
   @type("number") y = 0;

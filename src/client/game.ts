@@ -728,7 +728,8 @@ export class Game {
     this.hud.renderScoreboard(
       [...state.players.values()].map((p) => ({
         id: p.id, name: p.name, kills: p.kills, deaths: p.deaths,
-        ping: p.ping, forcedLagMs: p.forcedLagMs, artificialLagMs: p.artificialLagMs, host: p.host,
+        ping: p.ping, forcedLagMs: p.forcedLagMs, artificialLagMs: p.artificialLagMs,
+        host: p.host, bot: p.bot,
       })),
       this.net.sessionId,
       state.code,

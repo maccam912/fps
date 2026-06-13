@@ -26,6 +26,7 @@ export interface ScoreRow {
   forcedLagMs: number;
   artificialLagMs: number;
   host: boolean;
+  bot: boolean;
 }
 
 function el<T extends HTMLElement = HTMLElement>(id: string): T {
@@ -179,7 +180,7 @@ export class Hud {
         const crown = r.host ? "👑" : "";
         const lag = `${r.forcedLagMs}ms (+${r.artificialLagMs}ms)`;
         tr.innerHTML = `<td>${crown}</td><td></td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.ping}ms</td><td>${lag}</td>`;
-        (tr.children[1] as HTMLElement).textContent = r.name;
+        (tr.children[1] as HTMLElement).textContent = r.bot ? `${r.name} [BOT]` : r.name;
         body.appendChild(tr);
       });
   }

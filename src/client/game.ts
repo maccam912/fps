@@ -498,9 +498,10 @@ export class Game {
       const pitchDelta = this.inputPitch - oldPitch;
 
       const state = this.net.room.state;
-      if (state.delayedMouseLook && state.forcedLagMs > 0) {
+      const myLagMs = state.players.get(this.net.sessionId)?.forcedLagMs ?? state.forcedLagMs;
+      if (state.delayedMouseLook && myLagMs > 0) {
         const queued = {
-          applyAt: performance.now() + state.forcedLagMs,
+          applyAt: performance.now() + myLagMs,
           yaw: yawDelta,
           pitch: pitchDelta,
         };
@@ -541,7 +542,7 @@ export class Game {
       if (k === "Space") { this.latched.jump = true; e.preventDefault(); }
       if (k === "KeyR") this.latched.reload = true;
       if (k === "Tab") { this.hud.setScoreboardVisible(true); e.preventDefault(); }
-      if (k === "KeyL" && this.isHost()) {
+      if (k === "KeyL" && this.isHost() && this.net.room.state.lagMode === "host") {
         const panel = document.getElementById("host-panel")!;
         panel.classList.toggle("hidden");
         if (!panel.classList.contains("hidden")) document.exitPointerLock();
@@ -679,7 +680,7 @@ export class Game {
       this.hud.setHealth(ms.hp);
       this.hud.setWeapon(ms.weapon, ms.ammo, ms.reloading);
       this.setViewmodel(ms.weapon);
-      this.hud.setPing(this.net.rtt, state.forcedLagMs);
+      this.hud.setPing(this.net.rtt, ms.forcedLagMs, state.lagMode);
       this.hud.setDead(!ms.alive && !roundEnded);
       if (!ms.alive && this.wasAlive) document.exitPointerLock?.();
       if (ms.alive && !this.wasAlive) this.audio.play("respawn", 0.5);
@@ -726,7 +727,8 @@ export class Game {
     // scoreboard + win banner
     this.hud.renderScoreboard(
       [...state.players.values()].map((p) => ({
-        id: p.id, name: p.name, kills: p.kills, deaths: p.deaths, ping: p.ping, host: p.host,
+        id: p.id, name: p.name, kills: p.kills, deaths: p.deaths,
+        ping: p.ping, forcedLagMs: p.forcedLagMs, host: p.host,
       })),
       this.net.sessionId,
       state.code,

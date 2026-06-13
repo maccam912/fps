@@ -24,6 +24,7 @@ export class PlayerState extends Schema {
   @type("boolean") reloading = false;
 
   @type("uint16") ping = 0; // natural RTT in ms, self-reported by the client
+  @type("number") forcedLagMs = 0;
 }
 
 export class PickupState extends Schema {
@@ -52,6 +53,9 @@ export class GameState extends Schema {
 
   @type("string") hostId = "";
   @type("uint16") forcedLagMs = 0;
+  @type("string") lagMode = "host";
+  @type("number") lagPerKillMs = 50;
+  @type("number") lagCapMs = 0;
   @type("boolean") delayedMouseLook = false;
   @type("string") code = "";
   @type("string") mapId = "";

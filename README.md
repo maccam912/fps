@@ -1,10 +1,16 @@
 # LAG WAR 💥
 
-A browser FPS where **the host controls the lag**. Free-for-all arena deathmatch,
-no login, party codes — and a host console that injects 0 ms to **10 whole
-seconds** of artificial latency for *everyone* in the match. At 200 ms it feels
-like bad wifi. At 3 s it's slapstick. At 10 s it's a turn-based game played in
-real time.
+A browser FPS built around artificial latency. Free-for-all arena deathmatch,
+no login, party codes, and two lag modes chosen when the party is created:
+
+- **Host controlled** — a host console injects 0 ms to **10 whole seconds** of
+  artificial latency for everyone.
+- **More kills, more lag** — each player earns their own input delay as their
+  kill count rises. The milliseconds per kill are configurable, and the
+  optional cap is uncapped by default.
+
+At 200 ms it feels like bad wifi. At 3 s it's slapstick. At 10 s it's a
+turn-based game played in real time.
 
 Because precise aim is hopeless under heavy lag, the arena continuously spawns
 four random weapon pickups. Walk over one to replace your current weapon.
@@ -39,7 +45,7 @@ is in the link). Friends on your network/host can join the same code.
 | R | reload |
 | Space | jump |
 | Tab | scoreboard (kills, deaths, natural ping) |
-| L | **host only**: lag console (slider, presets up to 10 s) |
+| L | **host only, host-controlled mode**: lag console |
 
 The host chooses the map (or a random map) and round length when creating the
 party. Six arenas range from the compact Pit to the huge Megacomplex. Kills and
@@ -49,10 +55,11 @@ final leaderboard until the host starts the next round.
 ## How the lag works
 
 - Clients ping the server every 2 s to measure **natural RTT** (shown on the scoreboard).
-- The host's **forced lag** is applied server-side: every input (movement, aim,
-  trigger pulls) is queued and only applied to the authoritative sim
-  `forcedLagMs` later, preserving relative timing — your 500 ms strafe is still
-  a 500 ms strafe, just N seconds late.
+- **Forced lag** is applied server-side: every input (movement, aim, trigger
+  pulls) is queued and only applied to the authoritative sim after that
+  player's current delay. In host-controlled mode everyone shares the selected
+  delay. In kill-lag mode each player's delay is `kills × milliseconds per
+  kill`, limited only when the creator sets a cap.
 - There is deliberately **no client-side prediction**: your own body obeys you
   late. Your mouse *look* stays instant (so 10 s of lag is funny instead of
   nauseating), but where your shots go is decided by where you were aiming when

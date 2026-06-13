@@ -89,6 +89,9 @@ html, body {
   display: block; min-height: 34px; margin-top: 7px;
   color: #8da4b0; font-size: 11px; line-height: 1.45;
 }
+.lag-options {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
 
 .check-field {
   display: flex; align-items: flex-start; gap: 10px;

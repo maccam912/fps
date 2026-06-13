@@ -23,6 +23,7 @@ export interface ScoreRow {
   kills: number;
   deaths: number;
   ping: number;
+  forcedLagMs: number;
   host: boolean;
 }
 
@@ -84,7 +85,7 @@ export class Hud {
     el("ammo-label").textContent = weapon === "mg" ? "AMMO" : "CHARGES";
   }
 
-  setPing(naturalMs: number, forcedMs: number): void {
+  setPing(naturalMs: number, forcedMs: number, lagMode: string): void {
     el("ping-natural").textContent = `ping ${Math.round(naturalMs)}ms`;
     const f = el("ping-forced");
     f.classList.toggle("hidden", forcedMs === 0);
@@ -92,10 +93,12 @@ export class Hud {
 
     const banner = el("lag-banner");
     banner.classList.toggle("hidden", forcedMs === 0);
+    el("lag-label").textContent = lagMode === "kills" ? "KILL LAG" : "FORCED LAG";
     el("lag-value").textContent = `${(forcedMs / 1000).toFixed(1)}s`;
 
-    // keep host console in sync when someone else… well, only the host edits it,
-    // but reflect server state after clamping.
+    if (lagMode !== "host") return;
+
+    // Reflect server state after clamping.
     const slider = el<HTMLInputElement>("lag-slider");
     if (document.activeElement !== slider && document.activeElement?.id !== "lag-number") {
       slider.value = String(forcedMs);
@@ -173,7 +176,7 @@ export class Hud {
         const tr = document.createElement("tr");
         if (r.id === myId) tr.className = "me";
         const crown = r.host ? "👑" : "";
-        tr.innerHTML = `<td>${crown}</td><td></td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.ping}ms</td>`;
+        tr.innerHTML = `<td>${crown}</td><td></td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.ping}ms</td><td>${r.forcedLagMs}ms</td>`;
         (tr.children[1] as HTMLElement).textContent = r.name;
         body.appendChild(tr);
       });

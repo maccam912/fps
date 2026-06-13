@@ -13,7 +13,7 @@
   <div id="lobby" class="overlay">
     <div class="lobby-card">
       <h1 class="logo">LAG<span>WAR</span></h1>
-      <p class="tagline">free-for-all arena shooter. the host controls the lag. up to <b>10 whole seconds</b> of it.</p>
+      <p class="tagline">free-for-all arena shooter. choose host-controlled lag or make every kill add <b>your own delay</b>.</p>
 
       <label class="field">
         <span>YOUR NAME</span>
@@ -31,11 +31,30 @@
         <small id="map-detail"></small>
       </label>
 
+      <label class="field">
+        <span>LAG MODE (NEW PARTY ONLY)</span>
+        <select id="lag-mode">
+          <option value="host">HOST CONTROLLED</option>
+          <option value="kills">MORE KILLS, MORE LAG</option>
+        </select>
+      </label>
+
+      <div id="kill-lag-options" class="lag-options hidden">
+        <label class="field">
+          <span>LAG PER KILL (MS)</span>
+          <input id="lag-per-kill" type="number" min="0" step="10" value="50" />
+        </label>
+        <label class="field">
+          <span>LAG CAP (MS, BLANK = NO CAP)</span>
+          <input id="lag-cap" type="number" min="0" step="100" placeholder="NO CAP" />
+        </label>
+      </div>
+
       <label class="check-field">
         <input id="delayed-mouselook" type="checkbox" />
         <span>
           <b>DELAY MOUSE LOOK (NEW PARTY ONLY)</b>
-          Camera rotation obeys the host's forced lag too.
+          Camera rotation obeys your forced lag too.
         </span>
       </label>
 
@@ -65,7 +84,7 @@
     <div id="damage-vignette"></div>
 
     <div id="lag-banner" class="hidden">
-      <span class="lag-label">FORCED LAG</span>
+      <span id="lag-label" class="lag-label">FORCED LAG</span>
       <span id="lag-value">0.0s</span>
     </div>
 
@@ -102,7 +121,7 @@
     <div id="scoreboard" class="hidden">
       <div class="sb-title"><span id="sb-heading">SCOREBOARD</span> <span id="sb-code"></span></div>
       <table>
-        <thead><tr><th></th><th>player</th><th>kills</th><th>deaths</th><th>ping</th></tr></thead>
+        <thead><tr><th></th><th>player</th><th>kills</th><th>deaths</th><th>ping</th><th>lag</th></tr></thead>
         <tbody id="sb-body"></tbody>
       </table>
       <div id="round-results" class="hidden">

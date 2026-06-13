@@ -96,6 +96,9 @@ export type SimEvent =
 export class Match {
   timeMs = 0;
   forcedLagMs = 0;
+  lagMode: "host" | "kills" = "host";
+  lagPerKillMs = 50;
+  lagCapMs = 0;
   players = new Map<string, SimPlayer>();
   pickups = new Map<string, SimPickup>();
   entities = new Map<string, SimEntity>();
@@ -149,11 +152,26 @@ export class Match {
     this.forcedLagMs = Math.max(0, Math.min(MAX_FORCED_LAG_MS, Math.round(ms)));
   }
 
+  setKillLag(perKillMs: number, capMs = 0): void {
+    this.lagMode = "kills";
+    this.lagPerKillMs = sanitizeNonNegativeMs(perKillMs);
+    this.lagCapMs = sanitizeNonNegativeMs(capMs);
+  }
+
+  getPlayerLagMs(id: string): number {
+    if (this.lagMode === "host") return this.forcedLagMs;
+    const lag = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      (this.players.get(id)?.kills ?? 0) * this.lagPerKillMs,
+    );
+    return this.lagCapMs > 0 ? Math.min(lag, this.lagCapMs) : lag;
+  }
+
   enqueueInput(id: string, input: PlayerInput): void {
     if (this.roundPhase !== "playing") return;
     const p = this.players.get(id);
     if (!p) return;
-    const applyAt = this.timeMs + this.forcedLagMs;
+    const applyAt = this.timeMs + this.getPlayerLagMs(id);
     let i = p.queue.length;
     while (i > 0 && p.queue[i - 1].applyAt > applyAt) i--;
     p.queue.splice(i, 0, { applyAt, input });
@@ -836,4 +854,9 @@ function shuffle<T>(items: T[], rng: () => number): void {
 function clampRoundDuration(ms: number): number {
   const value = Number.isFinite(ms) ? Math.round(ms) : DEFAULT_ROUND_DURATION_MS;
   return Math.max(MIN_ROUND_DURATION_MS, Math.min(MAX_ROUND_DURATION_MS, value));
+}
+
+function sanitizeNonNegativeMs(ms: number): number {
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(ms)));
 }

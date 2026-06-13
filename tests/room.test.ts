@@ -104,6 +104,47 @@ describe("FpsRoom", () => {
     await host.leave();
   });
 
+  it("uses the creator's per-kill lag multiplier and optional cap", async () => {
+    const host = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "KILL", name: "Host", lagMode: "kills", lagPerKillMs: 75, lagCapMs: 500,
+    });
+    const peer = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "KILL", name: "Peer", lagMode: "host", lagPerKillMs: 999,
+    });
+    const room = server.getRoomById(host.roomId) as any;
+    await until(() => peer.state.players?.size === 2);
+
+    expect(peer.state.lagMode).toBe("kills");
+    expect(peer.state.lagPerKillMs).toBe(75);
+    expect(peer.state.lagCapMs).toBe(500);
+
+    room.match.players.get(host.sessionId).kills = 4;
+    room.match.players.get(peer.sessionId).kills = 10;
+    await until(() => host.state.players.get(host.sessionId)?.forcedLagMs === 300);
+    expect(host.state.players.get(peer.sessionId)?.forcedLagMs).toBe(500);
+
+    await sendAndProcess(room, host, MSG.setLag, { ms: 1000 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(host.state.forcedLagMs).toBe(0);
+
+    await peer.leave();
+    await host.leave();
+  });
+
+  it("leaves per-kill lag uncapped when the creator omits the cap", async () => {
+    const host = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "FREE", name: "Host", lagMode: "kills", lagPerKillMs: 50,
+    });
+    const room = server.getRoomById(host.roomId) as any;
+    await until(() => host.state.players?.has(host.sessionId));
+    room.match.players.get(host.sessionId).kills = 30;
+
+    await until(() => host.state.players?.get(host.sessionId)?.forcedLagMs === 1500);
+    expect(host.state.lagCapMs).toBe(0);
+
+    await host.leave();
+  });
+
   it("resolves random and invalid map selections to a valid map", async () => {
     const random = await server.sdk.joinOrCreate(ROOM_NAME, {
       code: "RNDA", name: "Random", mapId: "random",

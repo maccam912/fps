@@ -90,6 +90,31 @@ describe("movement and forced lag", () => {
     expect(p.pos.z).toBeGreaterThan(-18);
     expect(p.pos.z).toBeLessThan(-15);
   });
+
+  it("adds configurable uncapped lag per kill for each player", () => {
+    const m = new Match(1);
+    const a = m.addPlayer("a", "A", 0);
+    const b = m.addPlayer("b", "B", 1);
+    m.setKillLag(75);
+    a.kills = 4;
+    b.kills = 20;
+
+    expect(m.getPlayerLagMs("a")).toBe(300);
+    expect(m.getPlayerLagMs("b")).toBe(1500);
+
+    m.enqueueInput("a", input({ moveZ: 1 }));
+    m.enqueueInput("b", input({ moveZ: 1 }));
+    expect(a.queue[0].applyAt).toBe(300);
+    expect(b.queue[0].applyAt).toBe(1500);
+  });
+
+  it("caps kill-based lag when a cap is configured", () => {
+    const m = new Match(1);
+    const p = m.addPlayer("a", "A", 0);
+    m.setKillLag(50, 400);
+    p.kills = 20;
+    expect(m.getPlayerLagMs("a")).toBe(400);
+  });
 });
 
 describe("weapon pickups", () => {

@@ -15,6 +15,9 @@ interface JoinOptions {
   roundDurationMinutes?: number;
   delayedMouseLook?: boolean;
   mapId?: string;
+  lagMode?: string;
+  lagPerKillMs?: number;
+  lagCapMs?: number;
 }
 
 export class FpsRoom extends Room<GameState> {
@@ -31,6 +34,14 @@ export class FpsRoom extends Room<GameState> {
     this.state.code = String(options.code ?? "").toUpperCase().slice(0, 8);
     this.state.delayedMouseLook = options.delayedMouseLook === true;
     this.state.mapId = mapId;
+    if (options.lagMode === "kills") {
+      const perKillMs = sanitizeNonNegativeMs(options.lagPerKillMs, 50);
+      const capMs = sanitizeNonNegativeMs(options.lagCapMs, 0);
+      this.match.setKillLag(perKillMs, capMs);
+      this.state.lagMode = "kills";
+      this.state.lagPerKillMs = perKillMs;
+      this.state.lagCapMs = capMs;
+    }
     this.state.roundDurationMs = roundDurationMs;
     this.state.roundTimeLeftMs = roundDurationMs;
     this.setPatchRate(PATCH_MS);
@@ -51,7 +62,7 @@ export class FpsRoom extends Room<GameState> {
     });
 
     this.onMessage(MSG.setLag, (client, msg: { ms: number }) => {
-      if (client.sessionId !== this.state.hostId) return;
+      if (client.sessionId !== this.state.hostId || this.state.lagMode !== "host") return;
       const ms = Math.max(0, Math.min(MAX_FORCED_LAG_MS, Math.round(msg?.ms ?? 0)));
       this.match.setForcedLag(ms);
       this.state.forcedLagMs = ms;
@@ -160,6 +171,7 @@ export class FpsRoom extends Room<GameState> {
       ps.weapon = p.weapon;
       ps.ammo = p.ammo;
       ps.reloading = p.reloading;
+      ps.forcedLagMs = this.match.getPlayerLagMs(id);
     }
 
     syncMap(this.match.pickups, s.pickups, (p) => {
@@ -244,6 +256,12 @@ function sanitizeRoundDuration(minutes: unknown): number {
   if (!Number.isFinite(value)) return DEFAULT_ROUND_DURATION_MS;
   const ms = Math.round(value * 60_000);
   return Math.max(MIN_ROUND_DURATION_MS, Math.min(MAX_ROUND_DURATION_MS, ms));
+}
+
+function sanitizeNonNegativeMs(value: unknown, fallback: number): number {
+  const ms = Number(value);
+  if (!Number.isFinite(ms)) return fallback;
+  return Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(ms)));
 }
 
 function clamp(v: number, lo: number, hi: number) {

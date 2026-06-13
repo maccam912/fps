@@ -9,6 +9,10 @@ const codeInput = $<HTMLInputElement>("code-input");
 const durationInput = $<HTMLInputElement>("round-duration");
 const delayedMouseLookInput = $<HTMLInputElement>("delayed-mouselook");
 const mapSelect = $<HTMLSelectElement>("map-select");
+const lagModeSelect = $<HTMLSelectElement>("lag-mode");
+const lagPerKillInput = $<HTMLInputElement>("lag-per-kill");
+const lagCapInput = $<HTMLInputElement>("lag-cap");
+const killLagOptions = $("kill-lag-options");
 const mapDetail = $("map-detail");
 const errBox = $("lobby-error");
 
@@ -44,11 +48,20 @@ function updateMapDetail(): void {
 mapSelect.addEventListener("change", updateMapDetail);
 updateMapDetail();
 
+function updateLagOptions(): void {
+  killLagOptions.classList.toggle("hidden", lagModeSelect.value !== "kills");
+}
+lagModeSelect.addEventListener("change", updateLagOptions);
+updateLagOptions();
+
 async function join(
   code: string,
   roundDurationMinutes?: number,
   delayedMouseLook?: boolean,
   mapId?: string,
+  lagMode?: string,
+  lagPerKillMs?: number,
+  lagCapMs?: number,
 ): Promise<void> {
   const name = nameInput.value.trim() || randomName();
   localStorage.setItem("lagwar-name", name);
@@ -64,7 +77,7 @@ async function join(
       onWeaponFx: (m) => game.onWeaponFx(m),
       onPickup: (m) => game.onPickup(m),
       onHitConfirm: () => game.onHitConfirm(),
-    }, roundDurationMinutes, delayedMouseLook, mapId);
+    }, roundDurationMinutes, delayedMouseLook, mapId, lagMode, lagPerKillMs, lagCapMs);
 
     // Exposed for the headless smoke test.
     (window as any).__lagwar = { net, game };
@@ -84,11 +97,18 @@ async function join(
 
 $("create-btn").addEventListener("click", () => {
   const minutes = Math.max(1, Math.min(60, Number(durationInput.value) || 5));
+  const killLag = lagModeSelect.value === "kills";
+  const perKillMs = Math.max(0, Math.round(Number(lagPerKillInput.value) || 0));
+  const capValue = lagCapInput.value.trim();
+  const capMs = capValue === "" ? 0 : Math.max(0, Math.round(Number(capValue) || 0));
   join(
     codeInput.value.trim() || randomCode(),
     minutes,
     delayedMouseLookInput.checked,
     mapSelect.value,
+    lagModeSelect.value,
+    killLag ? perKillMs : undefined,
+    killLag ? capMs : undefined,
   );
 });
 $("join-btn").addEventListener("click", () => {

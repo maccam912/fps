@@ -39,6 +39,9 @@ export class Net {
     roundDurationMinutes?: number,
     delayedMouseLook?: boolean,
     mapId?: string,
+    lagMode?: string,
+    lagPerKillMs?: number,
+    lagCapMs?: number,
   ): Promise<void> {
     const client = new Client(endpoint());
     this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {
@@ -47,6 +50,9 @@ export class Net {
       roundDurationMinutes,
       delayedMouseLook,
       mapId,
+      lagMode,
+      lagPerKillMs,
+      lagCapMs,
     });
     this.$ = getStateCallbacks(this.room);
     await waitFor(() => Boolean(this.room.state.mapId), 5000);

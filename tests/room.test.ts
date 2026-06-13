@@ -72,6 +72,22 @@ describe("FpsRoom", () => {
     await b.leave();
   });
 
+  it("uses the creator's delayed mouse look setting", async () => {
+    const host = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "LOOK", name: "Host", delayedMouseLook: true,
+    });
+    const peer = await server.sdk.joinOrCreate(ROOM_NAME, {
+      code: "LOOK", name: "Peer", delayedMouseLook: false,
+    });
+    await until(() => peer.state.players?.size === 2);
+
+    expect(host.state.delayedMouseLook).toBe(true);
+    expect(peer.state.delayedMouseLook).toBe(true);
+
+    await peer.leave();
+    await host.leave();
+  });
+
   it("host can set forced lag; non-host cannot; values clamp at 10s", async () => {
     const host = await server.sdk.joinOrCreate(ROOM_NAME, { code: "LAGG", name: "Host" });
     const peer = await server.sdk.joinOrCreate(ROOM_NAME, { code: "LAGG", name: "Peer" });

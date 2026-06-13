@@ -32,12 +32,19 @@ export class Net {
     return this.room.sessionId;
   }
 
-  async connect(code: string, name: string, events: NetEvents, roundDurationMinutes?: number): Promise<void> {
+  async connect(
+    code: string,
+    name: string,
+    events: NetEvents,
+    roundDurationMinutes?: number,
+    delayedMouseLook?: boolean,
+  ): Promise<void> {
     const client = new Client(endpoint());
     this.room = await client.joinOrCreate<GameState>(ROOM_NAME, {
       code: code.toUpperCase(), // filterBy matches raw strings — normalize here
       name,
       roundDurationMinutes,
+      delayedMouseLook,
     });
     this.$ = getStateCallbacks(this.room);
 

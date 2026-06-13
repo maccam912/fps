@@ -42,6 +42,12 @@ interface WorldVisual {
   lamp?: Mesh;
 }
 
+interface DelayedLookDelta {
+  applyAt: number;
+  yaw: number;
+  pitch: number;
+}
+
 export class Game {
   private engine: Engine;
   private scene: Scene;
@@ -50,8 +56,11 @@ export class Game {
   private hud = new Hud();
   private audio = new AudioMan();
 
-  private yaw = 0;
-  private pitch = 0;
+  private inputYaw = 0;
+  private inputPitch = 0;
+  private viewYaw = 0;
+  private viewPitch = 0;
+  private lookQueue: DelayedLookDelta[] = [];
   private keys = new Set<string>();
   private firing = false;
   private latched = { jump: false, reload: false };
@@ -465,9 +474,25 @@ export class Game {
 
     window.addEventListener("mousemove", (e) => {
       if (document.pointerLockElement !== canvas) return;
-      this.yaw += e.movementX * MOUSE_SENS;
-      this.pitch -= e.movementY * MOUSE_SENS;
-      this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
+      const yawDelta = e.movementX * MOUSE_SENS;
+      const oldPitch = this.inputPitch;
+      this.inputYaw += yawDelta;
+      this.inputPitch = Math.max(-1.45, Math.min(1.45, oldPitch - e.movementY * MOUSE_SENS));
+      const pitchDelta = this.inputPitch - oldPitch;
+
+      const state = this.net.room.state;
+      if (state.delayedMouseLook && state.forcedLagMs > 0) {
+        const queued = {
+          applyAt: performance.now() + state.forcedLagMs,
+          yaw: yawDelta,
+          pitch: pitchDelta,
+        };
+        let i = this.lookQueue.length;
+        while (i > 0 && this.lookQueue[i - 1].applyAt > queued.applyAt) i--;
+        this.lookQueue.splice(i, 0, queued);
+      } else {
+        this.applyLookDelta(yawDelta, pitchDelta);
+      }
     });
     window.addEventListener("mousedown", (e) => {
       if (document.pointerLockElement === canvas && e.button === 0) this.firing = true;
@@ -524,8 +549,8 @@ export class Game {
       seq: this.seq++,
       moveX,
       moveZ,
-      yaw: this.yaw,
-      pitch: this.pitch,
+      yaw: this.inputYaw,
+      pitch: this.inputPitch,
       jump: this.latched.jump || this.keys.has("Space"),
       fire: this.firing && this.net.room.state.roundPhase === "playing",
       reload: this.latched.reload,
@@ -590,6 +615,7 @@ export class Game {
   private update(dt: number): void {
     const state = this.net.room?.state;
     if (!state) return;
+    this.applyDueLookDeltas();
     const roundEnded = state.roundPhase === "ended";
     const k = 1 - Math.exp(-SMOOTH * dt);
 
@@ -616,7 +642,7 @@ export class Game {
       }
     }
 
-    // Camera follows my (server-delayed) body; orientation is instant.
+    // Camera follows my server-delayed body; orientation may also be delayed.
     const me = this.players.get(this.net.sessionId);
     if (me) {
       const eye = me.root.position.add(new Vector3(0, PLAYER.eyeHeight, 0));
@@ -629,8 +655,8 @@ export class Game {
         this.shake *= Math.exp(-6 * dt);
       }
       this.camera.position.copyFrom(eye);
-      this.camera.rotation.y = this.yaw;
-      this.camera.rotation.x = -this.pitch;
+      this.camera.rotation.y = this.viewYaw;
+      this.camera.rotation.x = -this.viewPitch;
 
       const ms = me.state;
       this.hud.setHealth(ms.hp);
@@ -704,6 +730,21 @@ export class Game {
     }
     this.lastWinner = state.winnerName;
     this.lastRoundPhase = state.roundPhase;
+  }
+
+  private applyDueLookDeltas(): void {
+    const now = performance.now();
+    let due = 0;
+    while (due < this.lookQueue.length && this.lookQueue[due].applyAt <= now) {
+      const delta = this.lookQueue[due++];
+      this.applyLookDelta(delta.yaw, delta.pitch);
+    }
+    if (due > 0) this.lookQueue.splice(0, due);
+  }
+
+  private applyLookDelta(yaw: number, pitch: number): void {
+    this.viewYaw += yaw;
+    this.viewPitch = Math.max(-1.45, Math.min(1.45, this.viewPitch + pitch));
   }
 
   private myState(): PlayerState | undefined {

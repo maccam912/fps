@@ -7,7 +7,12 @@ import {
 } from "@shared/constants";
 import { Match } from "../sim/Match";
 
-interface JoinOptions { code?: string; name?: string; roundDurationMinutes?: number }
+interface JoinOptions {
+  code?: string;
+  name?: string;
+  roundDurationMinutes?: number;
+  delayedMouseLook?: boolean;
+}
 
 export class FpsRoom extends Room<GameState> {
   maxClients = 16;
@@ -19,6 +24,7 @@ export class FpsRoom extends Room<GameState> {
     this.match = new Match(Date.now() & 0xffffffff, roundDurationMs);
     this.setState(new GameState());
     this.state.code = String(options.code ?? "").toUpperCase().slice(0, 8);
+    this.state.delayedMouseLook = options.delayedMouseLook === true;
     this.state.roundDurationMs = roundDurationMs;
     this.state.roundTimeLeftMs = roundDurationMs;
     this.setPatchRate(PATCH_MS);

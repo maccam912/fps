@@ -52,6 +52,7 @@ export class GameState extends Schema {
 
   @type("string") hostId = "";
   @type("uint16") forcedLagMs = 0;
+  @type("boolean") delayedMouseLook = false;
   @type("string") code = "";
 
   @type("string") roundPhase = "playing";
